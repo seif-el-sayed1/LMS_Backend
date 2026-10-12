@@ -29,12 +29,6 @@ router.patch(
     LessonController.updateLesson
 )
 
-router.get(
-    "/:id",
-    protect,
-    allowedTo(ADMIN, SUPER_ADMIN),
-    LessonController.getLesson
-)
 
 router.delete(
     "/:id",
