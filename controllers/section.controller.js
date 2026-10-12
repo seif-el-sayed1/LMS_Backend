@@ -9,7 +9,7 @@ class SectionController {
     // @access  Private
     createSection = asyncHandler(async (req, res, next) => {
         const { courseId } = req.params;
-        const { title } = req.body;
+        const { title, isFree } = req.body;
 
         if (!title?.trim()) {
             return next(new ApiError("Title is required", 400));
@@ -40,6 +40,7 @@ class SectionController {
                     title: title.trim(),
                     order: nextOrder,
                     courseId,
+                    isFree: isFree || false,
                 },
             });
         });
