@@ -3,13 +3,18 @@ const express = require("express");
 const CourseController = require("../controllers/course.controller");
 const CourseValidator = require("../validators/course.validator");
 const { protect, allowedTo } = require("../middlewares/auth.middleware");
+const { optionalAuth, attachEnrollments } = require("../middlewares/optional.middleware");
 const { SUPER_ADMIN, ADMIN } = require("../utils/constants");
 
 const router = express.Router();
 
 router
     .route("/")
-    .get(CourseController.getAllCourses)
+    .get(
+        optionalAuth,
+        attachEnrollments,
+        CourseController.getAllCourses
+        )
     .post(
         protect,
         allowedTo(ADMIN, SUPER_ADMIN),
@@ -19,7 +24,11 @@ router
 
 router
     .route("/:id")
-    .get(CourseController.getCourseById)
+    .get(
+        optionalAuth,
+        attachEnrollments,
+        CourseController.getCourseById
+    )
     .patch(
         protect,
         allowedTo(SUPER_ADMIN, ADMIN),
