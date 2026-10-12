@@ -3,6 +3,7 @@ const prisma = require('../startup/db');
 const ApiError = require('../utils/ApiError');
 const ApiFeatures = require('../utils/ApiFeatures');
 const R2Service = require('../services/cloudflare.r2.service');
+const { ADMIN, SUPER_ADMIN } = require("../utils/constants")
 
 class CourseController{
 
@@ -175,20 +176,28 @@ class CourseController{
     });
 
 
-    // TODO: stay need enhancement
-    
     // @desc Get all courses
     // @route GET courses
     // @access Public
     getAllCourses = asyncHandler(async (req, res) => {
-        const courseInclude = {
+        const courseSelect = {
+            id: true,
+            title: true,
+            description: true,
+            slug: true,
+            image: true,
+            level: true,
+            price: true,
+            isFree: true,
+            hasDiscount: true,
+            discountPercent: true,
+            priceAfterDiscount: true,
+            createdAt: true,
             sections: {
                 where: { isDeleted: false },
-                orderBy: { order: "asc" },
-                include: {
-                    lessons: {
-                        where: { isDeleted: false },
-                        orderBy: { order: "asc" },
+                select: {
+                    _count: {
+                        select: { lessons: { where: { isDeleted: false } } },
                     },
                 },
             },
@@ -200,7 +209,7 @@ class CourseController{
             "Course",
             {
                 where: { isDeleted: false, isPublished: true },
-                include: courseInclude,
+                select: courseSelect,
             }
         )
             .search()
@@ -215,12 +224,22 @@ class CourseController{
 
         const courses = await apiFeatures.execute();
 
+        const data = courses.map(({ sections, ...course }) => ({
+            ...course,
+            isEnrolled: req.enrolledCourseIds.has(course.id),
+            sectionsCount: sections.length,
+            lessonsCount: sections.reduce(
+                (sum, section) => sum + section._count.lessons,
+                0
+            ),
+        }));
+
         res.status(200).json({
             success: true,
             message: "Courses fetched successfully",
             pagination: apiFeatures.paginationResult,
-            results: courses.length,
-            data: courses,
+            results: data.length,
+            data,
         });
     });
 
@@ -230,34 +249,80 @@ class CourseController{
     getCourseById = asyncHandler(async (req, res, next) => {
         const { id } = req.params;
 
+        const isEnrolled = req.enrolledCourseIds.has(id);
+        const canViewContent =
+            isEnrolled || [ADMIN, SUPER_ADMIN].includes(req.role);
+
+        const lessonSelect = {
+            id: true,
+            title: true,
+            description: true,
+            duration: true,
+            order: true,
+            isPreview: true,
+            ...(canViewContent && {
+                bunnyVideoId: true,
+                videoStatus: true,
+                attachments: true,
+            }),
+        };
+
         const course = await prisma.course.findFirst({
-            where: {
-                id,
-                isDeleted: false,
-                isPublished: true,
-            },
-            include: {
+            where: { id, isDeleted: false, isPublished: true },
+            select: {
+                id: true,
+                title: true,
+                description: true,
+                slug: true,
+                image: true,
+                level: true,
+                price: true,
+                isFree: true,
+                hasDiscount: true,
+                discountPercent: true,
+                priceAfterDiscount: true,
+                createdAt: true,
                 sections: {
                     where: { isDeleted: false },
                     orderBy: { order: "asc" },
-                    include: {
+                    select: {
+                        id: true,
+                        title: true,
+                        description: true,
+                        order: true,
+                        isFree: true,
                         lessons: {
                             where: { isDeleted: false },
                             orderBy: { order: "asc" },
+                            select: lessonSelect,
                         },
                     },
                 },
             },
         });
 
-        if (!course) {
-            return next(new ApiError("Course not found", 404));
+        if (!course) return next(new ApiError("Course not found", 404));
+
+        if (canViewContent) {
+            await Promise.all(
+                course.sections.flatMap((section) =>
+                    section.lessons.map(async (lesson) => {
+                        const links = await R2Service.getAttachmentLinks(
+                            lesson.attachments
+                        );
+                        lesson.attachments = links.map(({ key, url }) => ({
+                            name: key.split("/").pop(),
+                            url,
+                        }));
+                    })
+                )
+            );
         }
 
         res.status(200).json({
             success: true,
             message: "Course fetched successfully",
-            data: course,
+            data: { ...course, isEnrolled, canViewContent },
         });
     });
 
