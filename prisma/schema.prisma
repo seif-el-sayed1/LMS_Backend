@@ -39,6 +39,7 @@ enum PaymentStatus {
   SUCCESS
   FAILED
   REFUNDED
+  EXPIRED
 }
 
 enum VideoStatus {
@@ -48,7 +49,7 @@ enum VideoStatus {
   FAILED
 }
 
-enum Classes {
+enum Levels {
   FIRST_SECONDARY
   SECOND_SECONDARY
   THIRD_SECONDARY
@@ -92,9 +93,11 @@ model User {
   fullName                  String
   phone                     String       @unique
   parentPhone               String
-  class                     Classes
+  level                     Levels
+  studentCode               String       @unique
   groupeId                  String?
   studyMode                 StudyMode
+  budget                    Float        @default(0)
   role                      Role         @default(USER)
   governmentId              String
   // Password
@@ -158,14 +161,13 @@ model Course {
   slug               String       @unique
   price              Decimal      @default(0) @db.Decimal(10, 2)
   image              String
-  courseLevel        CourseLevel  @default(NORMAL)
+  level              Levels
   isFree             Boolean      @default(false)
   isPublished        Boolean      @default(true)
   isDeleted          Boolean      @default(false)
   discountPercent    Float        @default(0)
   hasDiscount        Boolean      @default(false)
   priceAfterDiscount Decimal      @default(0) @db.Decimal(10, 2)
-  startDate          DateTime
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
   //Relations
@@ -176,13 +178,15 @@ model Course {
 }
 
 model Section {
-  id        String   @id @default(uuid())
-  title     String
-  order     Int
-  isDeleted Boolean  @default(false)
-  lessons   Lesson[]
-  course    Course   @relation(fields: [courseId], references: [id])
-  courseId  String
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  order       Int
+  isDeleted   Boolean  @default(false)
+  isFree      Boolean  @default(false)
+  lessons     Lesson[]
+  course      Course   @relation(fields: [courseId], references: [id])
+  courseId    String
 
   @@index([courseId])
 }
@@ -194,7 +198,7 @@ model Lesson {
   bunnyVideoId String      @unique
   videoStatus  VideoStatus @default(UPLOADING)
   attachments  String[]    @default([])
-  isPreview    Boolean     @default(true)
+  isPreview    Boolean     @default(false)
   duration     Int?
   order        Int
   isDeleted    Boolean     @default(false)
@@ -208,7 +212,7 @@ model Lesson {
 }
 
 model LessonProgress {
-  id          String    @id @default(cuid())
+  id          String    @id @default(uuid())
   userId      String
   lessonId    String
   lesson      Lesson    @relation(fields: [lessonId], references: [id])
@@ -218,8 +222,38 @@ model LessonProgress {
   @@unique([userId, lessonId])
 }
 
+model Payment {
+  id String @id @default(uuid())
+
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  orderCode    String  @unique
+  amount       Decimal @db.Decimal(10, 2)
+  billedAmount Decimal @db.Decimal(10, 2)
+
+  cardNum  String?
+  cardType String?
+  currency String  @default("EGP")
+
+  status       PaymentStatus @default(PENDING)
+  clientSecret String?
+
+  enrollment Enrollment?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([courseId])
+}
+
 model Enrollment {
-  id     String @id @default(cuid())
+  id String @id @default(uuid())
+
   userId String
   user   User   @relation(fields: [userId], references: [id])
 
@@ -234,10 +268,11 @@ model Enrollment {
   enrolledAt  DateTime  @default(now())
 
   @@unique([userId, courseId])
+  @@index([courseId])
 }
 
 model Coupon {
-  id        String    @id @default(cuid())
+  id        String    @id @default(uuid())
   code      String    @unique
   discount  Float
   isPercent Boolean   @default(true)
@@ -247,33 +282,4 @@ model Coupon {
 
   courseId String?
   course   Course? @relation(fields: [courseId], references: [id])
-}
-
-model Payment {
-  id String @id @default(uuid())
-
-  courseId String
-  course   Course @relation(fields: [courseId], references: [id])
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
-
-  orderCode    String @unique
-  amount       Float
-  billedAmount Float
-
-  cardNum  String?
-  cardType String?
-  currency String? @default("EGP")
-
-  status       PaymentStatus @default(PENDING)
-  clientSecret String?
-
-  enrollment Enrollment?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([userId])
-  @@index([courseId])
 }
