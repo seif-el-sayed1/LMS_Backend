@@ -1,0 +1,235 @@
+const crypto = require("crypto");
+const axios = require("axios");
+const prisma = require("../startup/db");
+
+class PaymentClass {
+  async createClientSecretKey(course, user) {
+    const amount = course.hasDiscount
+      ? course.priceAfterDiscount * 100
+      : course.price * 100;
+
+    const items = [
+      {
+        name: "Course Fees",
+        description: "It's Course Fees",
+        quantity: 1,
+        amount,
+      },
+    ];
+
+    const requestBody = {
+      amount,
+      currency: "EGP",
+      payment_methods: [Number(process.env.PAYMOB_INTEGRATION_ID)],
+
+      items,
+
+      billing_data: {
+        first_name: user.fullName.split(" ")[0],
+        last_name: user.fullName.split(" ")[1] || "",
+        email: user.email || "undefined@email.com",
+        phone_number: user.phone || "NA",
+        apartment: 1,
+        floor: 1,
+        street: 1,
+        building: 1,
+        city: user.governmentId?.name || "NA",
+        state: user.region?.name || "NA",
+        country: "Egypt",
+        postal_code: "NA",
+        promoCodeApplied: "NA",
+      },
+
+      customer: {
+        first_name: user.fullName.split(" ")[0],
+        last_name: user.fullName.split(" ")[1] || "",
+        email: user.email || "undefined@email.com",
+        extras: { re: "22" },
+      },
+
+      extras: { ee: 22 },
+    };
+
+
+    let response;
+    try {
+      response = await axios.post(
+        "https://accept.paymob.com/v1/intention/",
+        requestBody,
+        { headers: { Authorization: `Token ${process.env.PAYMOB_SECRET_KEY}` } }
+      );
+    } catch (err) {
+      console.error("Paymob error:", JSON.stringify(err.response?.data, null, 2));
+      const e = new Error(
+        "Paymob: " + JSON.stringify(err.response?.data ?? err.message)
+      );
+      e.status = 400;
+      throw e;
+    }
+    
+    const transaction = await prisma.payment.create({
+      data: {
+        courseId: course.id,
+        orderCode: String(response.data.intention_order_id),
+        userId: user.id,
+        amount: amount / 100,
+        billedAmount: amount / 100,
+        currency: "EGP",
+        status: "PENDING",
+        clientSecret: response.data.client_secret,
+      },
+    });
+
+    return { transaction, clientSecret: response.data.client_secret };
+  }
+
+  async callBack(req, res) {
+    try {
+      if (!process.env.PAYMOB_HMAC_SECRET) {
+        return res
+          .status(500)
+          .json({ success: false, message: "Server misconfigured" });
+      }
+
+      const receivedHmac = req.query.hmac || req.headers["x-hmac-sha512"];
+      const transactionData = req.body?.obj;
+
+      if (!receivedHmac || !transactionData) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid callback data",
+        });
+      }
+
+      if (!/^[a-fA-F0-9]{128}$/.test(receivedHmac)) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid HMAC",
+        });
+      }
+
+      const hmacFields = [
+        transactionData.amount_cents,
+        transactionData.created_at,
+        transactionData.currency,
+        transactionData.error_occured,
+        transactionData.has_parent_transaction,
+        transactionData.id,
+        transactionData.integration_id,
+        transactionData.is_3d_secure,
+        transactionData.is_auth,
+        transactionData.is_capture,
+        transactionData.is_refunded,
+        transactionData.is_standalone_payment,
+        transactionData.is_voided,
+        transactionData.order?.id,
+        transactionData.owner,
+        transactionData.pending,
+        transactionData.source_data?.pan,
+        transactionData.source_data?.sub_type,
+        transactionData.source_data?.type,
+        transactionData.success,
+      ]
+        .map((value) => value ?? "")
+        .join("");
+
+      const calculatedHmac = crypto
+        .createHmac("sha512", process.env.PAYMOB_HMAC_SECRET)
+        .update(hmacFields)
+        .digest("hex");
+
+      const receivedBuffer = Buffer.from(receivedHmac, "hex");
+      const calculatedBuffer = Buffer.from(calculatedHmac, "hex");
+
+      if (!crypto.timingSafeEqual(receivedBuffer, calculatedBuffer)) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid HMAC",
+        });
+      }
+
+      const status =
+        transactionData.success === true &&
+        transactionData.pending === false &&
+        transactionData.error_occured === false
+          ? "SUCCESS"
+          : transactionData.pending === true
+          ? "PENDING"
+          : "FAILED";
+
+      const orderCode = String(transactionData.order?.id ?? "");
+
+      if (!orderCode) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing Paymob order ID",
+        });
+      }
+
+      const result = await prisma.$transaction(async (tx) => {
+        const payment = await tx.payment.findUnique({
+          where: { orderCode },
+        });
+
+        if (!payment) return { ignored: "PAYMENT_NOT_FOUND" };
+        if (payment.status === "SUCCESS") return { ignored: "ALREADY_PROCESSED" };
+
+        if (
+          status === "SUCCESS" &&
+          (Number(transactionData.amount_cents) !==
+            Math.round(Number(payment.amount) * 100) ||
+            transactionData.currency !== payment.currency)
+        ) {
+          return { ignored: "AMOUNT_OR_CURRENCY_MISMATCH" };
+        }
+
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            status,
+            cardNum: transactionData.source_data?.pan ?? null,
+            cardType: transactionData.source_data?.sub_type ?? null,
+            currency: transactionData.currency ?? payment.currency,
+          },
+        });
+
+        if (status === "SUCCESS") {
+          await tx.enrollment.upsert({
+            where: {
+              userId_courseId: {
+                userId: payment.userId,
+                courseId: payment.courseId,
+              },
+            },
+            update: {},
+            create: {
+              userId: payment.userId,
+              courseId: payment.courseId,
+              paymentId: payment.id,
+            },
+          });
+        }
+
+        return { ignored: null };
+      });
+
+      if (result.ignored) {
+        console.error("Paymob callback ignored:", result.ignored, { orderCode });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Callback processed",
+        status,
+      });
+    } catch (error) {
+      console.error("Paymob callback error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Callback processing failed",
+      });
+    }
+  }
+}
+
+module.exports = new PaymentClass();
