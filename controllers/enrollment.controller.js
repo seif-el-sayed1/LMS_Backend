@@ -44,6 +44,75 @@ class EnrollmentController {
         });
     });
 
+    //@desc    Get enrolled courses
+    //@route   GET /enrollments
+    //@access  Private
+    getMyEnrolledCourses = asyncHandler(async (req, res) => {
+        const courseSelect = {
+            id: true,
+            title: true,
+            description: true,
+            slug: true,
+            image: true,
+            level: true,
+            price: true,
+            isFree: true,
+            hasDiscount: true,
+            discountPercent: true,
+            priceAfterDiscount: true,
+            createdAt: true,
+            sections: {
+                where: { isDeleted: false },
+                select: {
+                    _count: {
+                        select: { lessons: { where: { isDeleted: false } } },
+                    },
+                },
+            },
+        };
+
+        const apiFeatures = new ApiFeatures(
+            prisma.enrollment,
+            req.query,
+            "Enrollment",
+            {
+                where: { userId: req.user.id },
+                include: { course: { select: courseSelect } },
+            }
+        )
+            .filter()
+            .sort()
+            .paginate();
+
+        apiFeatures.prismaArgs.where.userId = req.user.id;
+
+        await apiFeatures.calculatePagination();
+        const enrollments = await apiFeatures.execute();
+
+        const data = enrollments.map(({ course, ...enrollment }) => {
+            const { sections, ...courseData } = course;
+            return {
+                ...enrollment,
+                course: {
+                    ...courseData,
+                    sectionsCount: sections.length,
+                    lessonsCount: sections.reduce(
+                        (sum, section) => sum + section._count.lessons,
+                        0
+                    ),
+                },
+            };
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Enrolled courses fetched successfully",
+            pagination: apiFeatures.paginationResult,
+            results: data.length,
+            data,
+        });
+    });
+
 
 }
 
