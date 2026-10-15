@@ -184,6 +184,23 @@ class EnrollmentController {
 
         res.status(200).json({ success: true, data: enrollment });
     });    
+
+    //@desc get payment status by order code
+    //@route GET /enrollments/:orderCode
+    //@access Private
+    getPaymentStatus = asyncHandler(async (req, res, next) => {
+        const { orderCode } = req.params;
+
+        const payment = await prisma.payment.findFirst({
+            where: { orderCode, userId: req.user.id },
+            select: { status: true, courseId: true },
+        });
+
+        if (!payment) return next(new ApiError("Payment not found", 404));
+
+        res.status(200).json({ success: true, data: payment });
+    });
+
 }
 
 module.exports = new EnrollmentController();
