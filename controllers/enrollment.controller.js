@@ -12,25 +12,41 @@ class EnrollmentController {
     //@access  Private
     enrollToCourse = asyncHandler(async (req, res, next) => {
         const { courseId } = req.params;
+        const userId = req.user.id;
 
-        const course = await prisma.course.findUnique({
+        const course = await prisma.course.findFirst({
             where: { id: courseId, isPublished: true, isDeleted: false },
         });
 
         if (!course) {
             return next(new ApiError("Course not found", 404));
         }
-        
+
         const existingEnrollment = await prisma.enrollment.findUnique({
-            where: {
-                userId_courseId: { userId: req.user.id, courseId },
-            },
+            where: { userId_courseId: { userId, courseId } },
         });
 
         if (existingEnrollment) {
             return next(new ApiError("You are already enrolled in this course", 400));
         }
-        
+
+        const isActuallyFree =
+            course.isFree ||
+            Number(course.price) === 0 ||
+            (course.hasDiscount && Number(course.priceAfterDiscount) === 0);
+
+        if (isActuallyFree) {
+            const enrollment = await prisma.enrollment.create({
+                data: { userId, courseId },
+            });
+
+            return res.status(201).json({
+                success: true,
+                message: "Enrolled successfully",
+                data: { enrollmentId: enrollment.id, isFree: true },
+            });
+        }
+
         const data = await PaymentController.createClientSecretKey(course, req.user);
 
         data.paymentKey =
