@@ -326,6 +326,88 @@ class CourseController{
         });
     });
 
+    // @desc Get course students
+    // @route GET courses/:id/students
+    // @access Private (Admin, Super Admin)
+    getCourseStudents = asyncHandler(async (req, res, next) => {
+        const { id: courseId } = req.params;
+
+        const course = await prisma.course.findFirst({
+            where: { id: courseId, isDeleted: false },
+            select: { id: true, title: true }
+        });
+
+        if (!course) {
+            return next(new ApiError("Course not found", 404));
+        }
+
+        const enrollmentSelect = {
+            id: true,
+            progress: true,
+            enrolledAt: true,
+            completedAt: true,
+            user: {
+                select: {
+                    id: true,
+                    fullName: true,
+                    phone: true,
+                    parentPhone: true,
+                    studentCode: true,
+                    level: true,
+                    studyMode: true,
+                    government: { select: { id: true, name: true } },
+                    groupe: { select: { id: true, name: true, day: true, time: true } }
+                }
+            },
+            payment: {
+                select: {
+                    id: true,
+                    amount: true,
+                    billedAmount: true,
+                    status: true,
+                    orderCode: true,
+                    createdAt: true
+                }
+            }
+        };
+
+        const apiFeatures = new ApiFeatures(
+            prisma.enrollment,
+            req.query,
+            "Enrollment",
+            {
+                where: { courseId },
+                select: enrollmentSelect
+            }
+        )
+            .search()
+            .filter()
+            .sort()
+            .paginate();
+
+        apiFeatures.prismaArgs.where.courseId = courseId;
+
+        await apiFeatures.calculatePagination();
+
+        const enrollments = await apiFeatures.execute();
+
+        const data = enrollments.map((enrollment) => ({
+            enrollmentId: enrollment.id,
+            enrolledAt: enrollment.enrolledAt,
+            progress: enrollment.progress,
+            completedAt: enrollment.completedAt,
+            student: enrollment.user,
+            payment: enrollment.payment
+        }));
+
+        res.status(200).json({
+            success: true,
+            message: "Course students fetched successfully",
+            pagination: apiFeatures.paginationResult,
+            results: data.length,
+            data
+        });
+    });
 }
 
 module.exports = new CourseController();
