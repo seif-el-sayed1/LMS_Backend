@@ -23,24 +23,27 @@ class ApiFeatures {
           User: ["fullName", "email", "phone"],
           Admin: ["firstName", "lastName", "email"],
           Course: ["title", "description", "slug"],
-
       };
 
       const relationSearch = {
+          Enrollment: [
+              { user: { fullName: { contains: keyword, mode: "insensitive" } } },
+              { user: { phone: { contains: keyword, mode: "insensitive" } } },
+              { user: { studentCode: { contains: keyword, mode: "insensitive" } } },
+          ],
+      };
 
-      }
-
-      const fields = searchFields[this.modelName] || []
-      const relations = relationSearch[this.modelName] || []
+      const fields = searchFields[this.modelName] || [];
+      const relations = relationSearch[this.modelName] || [];
 
       this.prismaArgs.where.OR = [
           ...fields.map((field) => ({
               [field]: { contains: keyword, mode: "insensitive" }
           })),
           ...relations
-      ]
+      ];
 
-      return this
+      return this;
   }
 
   filter() {
