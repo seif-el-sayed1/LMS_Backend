@@ -54,9 +54,25 @@ const extractFieldFromCause = (cause) => {
 
 const handleDuplicatedFieldsDB = (err, lang) => {
   const cause = err.meta?.driverAdapterError?.cause;
+  const target = err.meta?.target;
+  const targetStr = Array.isArray(target) ? target.join(",") : String(target || "");
+
+  const isDuplicateEnrollment =
+    (targetStr.includes("userId") && targetStr.includes("courseId")) ||
+    (cause?.constraint?.fields?.includes("userId") &&
+      cause?.constraint?.fields?.includes("courseId")) ||
+    cause?.constraint?.index === "Enrollment_userId_courseId_key";
+
+  if (isDuplicateEnrollment) {
+    return new ApiError(
+      translate("You are already enrolled in this course", lang),
+      400
+    );
+  }
+
   const duplicateKey =
     extractFieldFromCause(cause) ||
-    (Array.isArray(err.meta?.target) ? err.meta.target[0] : err.meta?.target) ||
+    (Array.isArray(target) ? target[0] : target) ||
     "field";
 
   const alreadyUsed = translate("is already used", lang);
