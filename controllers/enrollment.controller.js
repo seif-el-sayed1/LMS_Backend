@@ -113,7 +113,77 @@ class EnrollmentController {
         });
     });
 
+    //@desc    Get enrolled course by id
+    //@route  GET /enrollments/:courseId
+    //@access  Private
+    getMyEnrollmentCourse = asyncHandler(async (req, res, next) => {
+        const { courseId } = req.params;
+        const userId = req.user.id;
 
+        const enrollment = await prisma.enrollment.findUnique({
+            where: { userId_courseId: { userId, courseId } },
+            select: {
+                id: true,
+                progress: true,
+                completedAt: true,
+                enrolledAt: true,
+                course: {
+                    select: {
+                        id: true,
+                        title: true,
+                        description: true,
+                        slug: true,
+                        image: true,
+                        level: true,
+                        sections: {
+                            where: { isDeleted: false },
+                            orderBy: { order: "asc" },
+                            select: {
+                                id: true,
+                                title: true,
+                                description: true,
+                                order: true,
+                                isFree: true,
+                                lessons: {
+                                    where: { isDeleted: false },
+                                    orderBy: { order: "asc" },
+                                    select: {
+                                        id: true,
+                                        title: true,
+                                        description: true,
+                                        duration: true,
+                                        order: true,
+                                        isPreview: true,
+                                        bunnyVideoId: true,
+                                        videoStatus: true,
+                                        attachments: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!enrollment) return next(new ApiError("Enrollment not found", 404));
+
+        await Promise.all(
+            enrollment.course.sections.flatMap((section) =>
+                section.lessons.map(async (lesson) => {
+                    const links = await R2Service.getAttachmentLinks(
+                        lesson.attachments
+                    );
+                    lesson.attachments = links.map(({ key, url }) => ({
+                        name: key.split("/").pop(),
+                        url,
+                    }));
+                })
+            )
+        );
+
+        res.status(200).json({ success: true, data: enrollment });
+    });    
 }
 
 module.exports = new EnrollmentController();
