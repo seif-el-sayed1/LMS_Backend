@@ -229,6 +229,55 @@ class LessonController {
         });
     });
 
+    // @desc   Get lesson attachment URL
+    // @route  GET /lessons/:courseId/:lessonId/attachment/:index
+    // @access Public (with optional authentication)
+    getLessonAttachment = asyncHandler(async (req, res, next) => {
+        /**
+         *  the :/index parameter is used to specify which attachment to retrieve
+         *  from the lesson's attachments array 
+        */
+
+        const { courseId, lessonId, index } = req.params;
+        const lesson = await prisma.lesson.findFirst({
+            where: {
+                id: lessonId,
+                isDeleted: false,
+                section: {
+                    courseId,
+                    isDeleted: false,
+                    course: { isPublished: true, isDeleted: false },
+                },
+            },
+            select: { attachments: true, isPreview: true },
+        });
+
+        if (!lesson) return next(new ApiError("Lesson not found", 404));
+
+        const isAdmin = [ADMIN, SUPER_ADMIN].includes(req.role);
+        let allowed = isAdmin || lesson.isPreview;
+
+        if (!allowed && req.user) {
+            const enrollment = await prisma.enrollment.findUnique({
+                where: { userId_courseId: { userId: req.user.id, courseId } },
+                select: { id: true },
+            });
+            allowed = !!enrollment;
+        }
+
+        if (!allowed) return next(new ApiError("You are not enrolled in this course", 403));
+
+        const key = lesson.attachments[Number(index)];
+        if (!key) return next(new ApiError("Attachment not found", 404));
+
+        const url = await R2Service.getAttachmentUrl(key, 300);
+
+        res.status(200).json({
+            success: true,
+            data: { name: key.split("/").pop(), url },
+        });
+    });
+
 }
 
 module.exports = new LessonController();
