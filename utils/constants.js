@@ -6,3 +6,4 @@ exports.ROLES = [exports.SUPER_ADMIN, exports.ADMIN, exports.USER];
 
 exports.STUDY_MODES = ["ONLINE", "CENTER"]
 exports.LEVELS = ["FIRST_SECONDARY", "SECOND_SECONDARY", "THIRD_SECONDARY"]
+exports.COUPON_TYPES = ["FULL_ACCESS", "PERCENT", "FIXED"];
