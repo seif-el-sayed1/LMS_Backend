@@ -3,6 +3,7 @@ const ApiError = require('../utils/ApiError');
 const asyncHandler = require('express-async-handler');
 const BunnyService = require("../services/bunny.service");
 const R2Service = require("../services/cloudflare.r2.service");
+const { ADMIN, SUPER_ADMIN } = require("../utils/constants");
 
 class LessonController {
 
@@ -179,6 +180,53 @@ class LessonController {
         }
 
         res.sendStatus(200);
+    });
+
+
+    // @desc   Get lesson video URL
+    // @route  GET /lessons/:courseId/:lessonId/video
+    // @access Public (with optional authentication)
+    getLessonVideo = asyncHandler(async (req, res, next) => {
+        const { courseId, lessonId } = req.params;
+
+        const lesson = await prisma.lesson.findFirst({
+            where: {
+                id: lessonId,
+                isDeleted: false,
+                section: {
+                    courseId,
+                    isDeleted: false,
+                    course: { isPublished: true, isDeleted: false },
+                },
+            },
+            select: { bunnyVideoId: true, videoStatus: true, isPreview: true },
+        });
+
+        if (!lesson) return next(new ApiError("Lesson not found", 404));
+
+        const isAdmin = [ADMIN, SUPER_ADMIN].includes(req.role);
+        let allowed = isAdmin || lesson.isPreview;
+
+        if (!allowed && req.user) {
+            const enrollment = await prisma.enrollment.findUnique({
+                where: { userId_courseId: { userId: req.user.id, courseId } },
+                select: { id: true },
+            });
+            allowed = !!enrollment;
+        }
+
+        if (!allowed) return next(new ApiError("You are not enrolled in this course", 403));
+
+        if (lesson.videoStatus !== "READY") {
+            return next(new ApiError("Video is still processing", 409));
+        }
+
+        const { url, expiresAt } = BunnyService.getSignedEmbedUrl(lesson.bunnyVideoId);
+
+        res.status(200).json({
+            success: true,
+            data: { url, expiresAt },
+        });
     });
 
 }
