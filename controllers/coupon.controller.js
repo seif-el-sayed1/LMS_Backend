@@ -111,6 +111,68 @@ class CouponController {
         });
     });
 
+    // @desc    Update coupon
+    // @route   PATCH /coupons/:id
+    // @access  Private (ADMIN, SUPER_ADMIN)
+    updateCoupon = asyncHandler(async (req, res, next) => {
+        const { id } = req.params;
+        const {
+            code, value, maxUses, perUserLimit,
+            startsAt, expiresAt, isActive,
+        } = req.body;
+
+        const coupon = await prisma.coupon.findUnique({ where: { id } });
+        if (!coupon) {
+            return next(new ApiError("Coupon not found", 404));
+        }
+
+        if (value !== undefined) {
+            if (coupon.type === "FULL_ACCESS") {
+                return next(new ApiError("Value is not allowed for FULL_ACCESS coupons", 400));
+            }
+            if (coupon.type === "PERCENT" && value > 100) {
+                return next(new ApiError("Percentage discount cannot exceed 100", 400));
+            }
+        }
+
+        if (maxUses != null && maxUses < coupon.usedCount) {
+            return next(
+                new ApiError(`Max uses cannot be less than current usage (${coupon.usedCount})`, 400)
+            );
+        }
+
+        const newStartsAt =
+            startsAt === undefined ? coupon.startsAt : startsAt ? new Date(startsAt) : null;
+        const newExpiresAt =
+            expiresAt === undefined ? coupon.expiresAt : expiresAt ? new Date(expiresAt) : null;
+
+        if (newStartsAt && newExpiresAt && newExpiresAt <= newStartsAt) {
+            return next(new ApiError("Expiry date must be after start date", 400));
+        }
+
+        const updatedCoupon = await prisma.coupon.update({
+            where: { id },
+            data: {
+                code: code?.trim().toUpperCase(),
+                value,
+                maxUses,
+                perUserLimit,
+                startsAt: newStartsAt,
+                expiresAt: newExpiresAt,
+                isActive,
+            },
+            include: {
+                course: { select: { id: true, title: true, slug: true } },
+            },
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Coupon updated successfully",
+            data: updatedCoupon,
+        });
+    });
+
     
 }
 
