@@ -23,6 +23,7 @@ class ApiFeatures {
           User: ["fullName", "email", "phone"],
           Admin: ["firstName", "lastName", "email"],
           Course: ["title", "description", "slug"],
+          Coupon: ["code"],
       };
 
       const relationSearch = {
@@ -30,6 +31,13 @@ class ApiFeatures {
               { user: { fullName: { contains: keyword, mode: "insensitive" } } },
               { user: { phone: { contains: keyword, mode: "insensitive" } } },
               { user: { studentCode: { contains: keyword, mode: "insensitive" } } },
+          ],
+          CouponRedemption: [
+              { user: { fullName: { contains: keyword, mode: "insensitive" } } },
+              { user: { phone: { contains: keyword, mode: "insensitive" } } },
+              { user: { studentCode: { contains: keyword, mode: "insensitive" } } },
+              { coupon: { code: { contains: keyword, mode: "insensitive" } } },
+              { course: { title: { contains: keyword, mode: "insensitive" } } },
           ],
       };
 
