@@ -58,6 +58,22 @@ class BunnyService {
         return res.json();
     };
 
+    getSignedEmbedUrl = (videoId, ttlSeconds = 10) => {
+        const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
+
+        const token = crypto
+            .createHash("sha256")
+            .update(process.env.BUNNY_TOKEN_AUTH_KEY + videoId + expires)
+            .digest("hex");
+
+        const url =
+            `https://iframe.mediadelivery.net/embed/${process.env.BUNNY_LIBRARY_ID}/${videoId}` +
+            `?token=${token}&expires=${expires}`;
+
+        return { url, expiresAt: new Date(expires * 1000) };
+    };
+
+
     verifyWebhookSignature = (rawBody, headers) => {
         if (headers["x-bunnystream-signature-version"] !== "v1") return false;
         if (headers["x-bunnystream-signature-algorithm"] !== "hmac-sha256") return false;
