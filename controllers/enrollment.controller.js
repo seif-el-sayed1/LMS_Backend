@@ -170,7 +170,6 @@ class EnrollmentController {
                                         duration: true,
                                         order: true,
                                         isPreview: true,
-                                        bunnyVideoId: true,
                                         videoStatus: true,
                                         attachments: true,
                                     },
