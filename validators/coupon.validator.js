@@ -74,6 +74,40 @@ class CouponValidator {
         joiErrorHandler(schema, req);
         next();
     });
+
+    validateUpdateCoupon = asyncHandler(async (req, res, next) => {
+        const schema = Joi.object({
+            code: Joi.string().trim().min(3).max(32).messages({
+                "string.min": "Coupon code must be at least 3 characters",
+                "string.max": "Coupon code cannot exceed 32 characters",
+                "string.empty": "Coupon code cannot be empty",
+            }),
+            value: Joi.number().integer().min(1).messages({
+                "number.min": "Value must be at least 1",
+            }),
+            maxUses: Joi.number().integer().min(1).allow(null).messages({
+                "number.min": "Max uses must be at least 1",
+            }),
+            perUserLimit: Joi.number().integer().min(1).messages({
+                "number.min": "Per user limit must be at least 1",
+            }),
+            startsAt: Joi.date().iso().allow(null).messages({
+                "date.format": "Start date must be a valid ISO date",
+            }),
+            expiresAt: Joi.date().iso().allow(null).messages({
+                "date.format": "Expiry date must be a valid ISO date",
+            }),
+            isActive: Joi.boolean(),
+        })
+            .min(1)
+            .messages({
+                "object.min": "At least one field must be provided to update",
+                "object.unknown": "This field cannot be updated",
+            });
+
+        joiErrorHandler(schema, req);
+        next();
+    });
 }
 
 module.exports = new CouponValidator();
