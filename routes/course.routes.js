@@ -23,6 +23,14 @@ router
     );
 
 router
+    .route("/:id/students")
+    .get(
+        protect,
+        allowedTo(SUPER_ADMIN, ADMIN),
+        CourseController.getCourseStudents
+    );
+
+router
     .route("/:id")
     .get(
         optionalAuth,
