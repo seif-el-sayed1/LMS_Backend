@@ -303,18 +303,12 @@ class CourseController{
         if (!course) return next(new ApiError("Course not found", 404));
 
         if (canViewContent) {
-            await Promise.all(
-                course.sections.flatMap((section) =>
-                    section.lessons.map(async (lesson) => {
-                        const links = await R2Service.getAttachmentLinks(
-                            lesson.attachments
-                        );
-                        lesson.attachments = links.map(({ key, url }) => ({
-                            name: key.split("/").pop(),
-                            url,
-                        }));
-                    })
-                )
+            course.sections.forEach((section) =>
+                section.lessons.forEach((lesson) => {
+                    lesson.attachments = lesson.attachments.map((key) => ({
+                        name: key.split("/").pop(),
+                    }));
+                })
             );
         }
 
