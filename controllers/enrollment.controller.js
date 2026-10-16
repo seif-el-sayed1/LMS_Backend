@@ -183,22 +183,16 @@ class EnrollmentController {
 
         if (!enrollment) return next(new ApiError("Enrollment not found", 404));
 
-        await Promise.all(
-            enrollment.course.sections.flatMap((section) =>
-                section.lessons.map(async (lesson) => {
-                    const links = await R2Service.getAttachmentLinks(
-                        lesson.attachments
-                    );
-                    lesson.attachments = links.map(({ key, url }) => ({
-                        name: key.split("/").pop(),
-                        url,
-                    }));
-                })
-            )
+        enrollment.course.sections.forEach((section) =>
+            section.lessons.forEach((lesson) => {
+                lesson.attachments = lesson.attachments.map((key) => ({
+                    name: key.split("/").pop(),
+                }));
+            })
         );
 
         res.status(200).json({ success: true, data: enrollment });
-    });    
+    });
 
     //@desc get payment status by order code
     //@route GET /enrollments/:orderCode
