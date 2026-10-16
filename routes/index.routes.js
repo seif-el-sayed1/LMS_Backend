@@ -13,6 +13,7 @@ let sectionRoutes = require("./section.routes");
 let lessonRoutes = require("./lesson.routes");
 let paymentRoutes = require("./payment.routes");
 let enrollmentRoutes = require("./enrollment.routes");
+let couponRoutes = require("./coupon.routes");
 
 let governmentRoutes = require("./government.routes");
 let groupeRoutes = require("./groupe.routes");
@@ -28,6 +29,7 @@ appRouter.use(`${BASE_URL}/sections`, sectionRoutes);
 appRouter.use(`${BASE_URL}/lessons`, lessonRoutes);
 appRouter.use(`${BASE_URL}/payments`, paymentRoutes);
 appRouter.use(`${BASE_URL}/enrollments`, enrollmentRoutes);
+appRouter.use(`${BASE_URL}/coupons`, couponRoutes);
 
 appRouter.use(`${BASE_URL}/governments`, governmentRoutes);
 appRouter.use(`${BASE_URL}/groupes`, groupeRoutes);
