@@ -261,7 +261,6 @@ class CourseController{
             order: true,
             isPreview: true,
             ...(canViewContent && {
-                bunnyVideoId: true,
                 videoStatus: true,
                 attachments: true,
             }),
