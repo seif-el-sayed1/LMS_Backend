@@ -60,6 +60,12 @@ enum StudyMode {
   CENTER
 }
 
+enum CouponType {
+  FULL_ACCESS
+  PERCENT
+  FIXED
+}
+
 // Models
 model Admin {
   id                     String    @id @default(uuid())
@@ -87,18 +93,18 @@ model Admin {
 }
 
 model User {
-  id                        String       @id @default(uuid())
-  lang                      Lang         @default(AR)
-  loginType                 LoginType    @default(EMAIL)
+  id                        String             @id @default(uuid())
+  lang                      Lang               @default(AR)
+  loginType                 LoginType          @default(EMAIL)
   fullName                  String
-  phone                     String       @unique
+  phone                     String             @unique
   parentPhone               String
   level                     Levels
-  studentCode               String       @unique
+  studentCode               String             @unique
   groupeId                  String?
   studyMode                 StudyMode
-  budget                    Float        @default(0)
-  role                      Role         @default(USER)
+  budget                    Float              @default(0)
+  role                      Role               @default(USER)
   governmentId              String
   // Password
   password                  String
@@ -112,22 +118,23 @@ model User {
   verificationCodeVerified  Boolean?
   passwordVerificationToken String?
   passwordResetExpiresAt    DateTime?
-  isVerified                Boolean      @default(false)
+  isVerified                Boolean            @default(false)
   // Active
   deactivatedAt             DateTime?
-  isActive                  Boolean      @default(true)
-  isBlocked                 Boolean      @default(false)
+  isActive                  Boolean            @default(true)
+  isBlocked                 Boolean            @default(false)
   // Auth
   token                     String?
   tokenExpDate              DateTime?
-  notificationToken         String?      @default("")
+  notificationToken         String?            @default("")
   // Timestamps
-  createdAt                 DateTime     @default(now())
-  updatedAt                 DateTime     @updatedAt
-  government                Government   @relation(fields: [governmentId], references: [id])
-  groupe                    Groupe?      @relation(fields: [groupeId], references: [id])
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+  government                Government         @relation(fields: [governmentId], references: [id])
+  groupe                    Groupe?            @relation(fields: [groupeId], references: [id])
   enrollments               Enrollment[]
   payments                  Payment[]
+  couponRedemptions         CouponRedemption[]
 
   @@index(fullName)
 }
@@ -155,26 +162,27 @@ model Groupe {
 }
 
 model Course {
-  id                 String       @id @default(uuid())
+  id                 String             @id @default(uuid())
   title              String
   description        String
-  slug               String       @unique
-  price              Decimal      @default(0) @db.Decimal(10, 2)
+  slug               String             @unique
+  price              Decimal            @default(0) @db.Decimal(10, 2)
   image              String
   level              Levels
-  isFree             Boolean      @default(false)
-  isPublished        Boolean      @default(true)
-  isDeleted          Boolean      @default(false)
-  discountPercent    Float        @default(0)
-  hasDiscount        Boolean      @default(false)
-  priceAfterDiscount Decimal      @default(0) @db.Decimal(10, 2)
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  isFree             Boolean            @default(false)
+  isPublished        Boolean            @default(true)
+  isDeleted          Boolean            @default(false)
+  discountPercent    Float              @default(0)
+  hasDiscount        Boolean            @default(false)
+  priceAfterDiscount Decimal            @default(0) @db.Decimal(10, 2)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
   //Relations
   sections           Section[]
   enrollments        Enrollment[]
   coupons            Coupon[]
   payments           Payment[]
+  couponRedemptions  CouponRedemption[]
 }
 
 model Section {
@@ -231,6 +239,9 @@ model Payment {
   userId String
   user   User   @relation(fields: [userId], references: [id])
 
+  couponId String?
+  coupon   Coupon? @relation(fields: [couponId], references: [id], onDelete: Restrict)
+
   orderCode    String  @unique
   amount       Decimal @db.Decimal(10, 2)
   billedAmount Decimal @db.Decimal(10, 2)
@@ -243,12 +254,14 @@ model Payment {
   clientSecret String?
 
   enrollment Enrollment?
+  redemption CouponRedemption?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([courseId])
+  @@index([couponId])
 }
 
 model Enrollment {
@@ -267,19 +280,62 @@ model Enrollment {
   completedAt DateTime?
   enrolledAt  DateTime  @default(now())
 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([userId, courseId])
   @@index([courseId])
 }
 
 model Coupon {
-  id        String    @id @default(uuid())
-  code      String    @unique
-  discount  Float
-  isPercent Boolean   @default(true)
-  expiresAt DateTime?
-  maxUses   Int?
-  usedCount Int       @default(0)
+  id   String     @id @default(uuid())
+  code String     @unique
+  type CouponType
 
-  courseId String?
-  course   Course? @relation(fields: [courseId], references: [id])
+  value Decimal? @db.Decimal(10, 2)
+
+  maxUses      Int?
+  usedCount    Int  @default(0)
+  perUserLimit Int  @default(1)
+
+  startsAt  DateTime?
+  expiresAt DateTime?
+  isActive  Boolean   @default(true)
+
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Restrict)
+
+  redemptions CouponRedemption[]
+  payments    Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId])
+}
+
+model CouponRedemption {
+  id String @id @default(uuid())
+
+  couponId String
+  coupon   Coupon @relation(fields: [couponId], references: [id], onDelete: Restrict)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  paymentId String?  @unique
+  payment   Payment? @relation(fields: [paymentId], references: [id])
+
+  originalPrice  Decimal @db.Decimal(10, 2)
+  discountAmount Decimal @db.Decimal(10, 2)
+  finalPrice     Decimal @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+
+  @@index([couponId, userId])
+  @@index([userId])
+  @@index([courseId])
 }
