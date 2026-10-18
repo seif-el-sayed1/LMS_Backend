@@ -3,10 +3,16 @@ const axios = require("axios");
 const prisma = require("../startup/db");
 
 class PaymentClass {
-  async createClientSecretKey(course, user) {
-    const amount = course.hasDiscount
-      ? course.priceAfterDiscount * 100
-      : course.price * 100;
+  async createClientSecretKey(course, user, couponData = null) {
+    const originalPrice = Number(
+      course.hasDiscount ? course.priceAfterDiscount : course.price
+    );
+
+    const finalPrice = couponData
+      ? couponData.pricing.finalPrice
+      : originalPrice;
+
+    const amount = Math.round(finalPrice * 100);
 
     const items = [
       {
@@ -50,7 +56,6 @@ class PaymentClass {
       extras: { ee: 22 },
     };
 
-
     let response;
     try {
       response = await axios.post(
@@ -66,14 +71,15 @@ class PaymentClass {
       e.status = 400;
       throw e;
     }
-    
+
     const transaction = await prisma.payment.create({
       data: {
         courseId: course.id,
         orderCode: String(response.data.intention_order_id),
         userId: user.id,
-        amount: amount / 100,
-        billedAmount: amount / 100,
+        couponId: couponData?.coupon.id ?? null,
+        amount: originalPrice,
+        billedAmount: finalPrice,
         currency: "EGP",
         status: "PENDING",
         clientSecret: response.data.client_secret,
@@ -177,7 +183,7 @@ class PaymentClass {
         if (
           status === "SUCCESS" &&
           (Number(transactionData.amount_cents) !==
-            Math.round(Number(payment.amount) * 100) ||
+            Math.round(Number(payment.billedAmount) * 100) ||
             transactionData.currency !== payment.currency)
         ) {
           return { ignored: "AMOUNT_OR_CURRENCY_MISMATCH" };
@@ -208,6 +214,25 @@ class PaymentClass {
               paymentId: payment.id,
             },
           });
+
+          if (payment.couponId) {
+            await tx.coupon.update({
+              where: { id: payment.couponId },
+              data: { usedCount: { increment: 1 } },
+            });
+
+            await tx.couponRedemption.create({
+              data: {
+                couponId: payment.couponId,
+                userId: payment.userId,
+                courseId: payment.courseId,
+                paymentId: payment.id,
+                originalPrice: payment.amount,
+                discountAmount: payment.amount.sub(payment.billedAmount),
+                finalPrice: payment.billedAmount,
+              },
+            });
+          }
         }
 
         return { ignored: null };
