@@ -3,7 +3,7 @@ const prisma = require('../startup/db');
 const ApiError = require('../utils/ApiError');
 const ApiFeatures = require('../utils/ApiFeatures');
 const PaymentController = require('./payment.controller');
-const R2Service = require('../services/cloudflare.r2.service');
+const { evaluateCoupon } = require("../utils/coupons");
 
 class EnrollmentController {
 
@@ -12,12 +12,12 @@ class EnrollmentController {
     //@access  Private
     enrollToCourse = asyncHandler(async (req, res, next) => {
         const { courseId } = req.params;
+        const { couponCode } = req.body;
         const userId = req.user.id;
 
         const course = await prisma.course.findFirst({
             where: { id: courseId, isPublished: true, isDeleted: false },
         });
-
         if (!course) {
             return next(new ApiError("Course not found", 404));
         }
@@ -25,7 +25,6 @@ class EnrollmentController {
         const existingEnrollment = await prisma.enrollment.findUnique({
             where: { userId_courseId: { userId, courseId } },
         });
-
         if (existingEnrollment) {
             return next(new ApiError("You are already enrolled in this course", 400));
         }
@@ -47,7 +46,51 @@ class EnrollmentController {
             });
         }
 
-        const data = await PaymentController.createClientSecretKey(course, req.user);
+        const couponData = couponCode
+            ? await evaluateCoupon({ code: couponCode, courseId, userId })
+            : null;
+
+        if (couponData && couponData.pricing.finalPrice === 0) {
+            const { coupon, pricing } = couponData;
+
+            const enrollment = await prisma.$transaction(async (tx) => {
+                const created = await tx.enrollment.create({
+                    data: { userId, courseId },
+                });
+
+                const claimed = await tx.coupon.updateMany({
+                    where: {
+                        id: coupon.id,
+                        ...(coupon.maxUses !== null && { usedCount: { lt: coupon.maxUses } }),
+                    },
+                    data: { usedCount: { increment: 1 } },
+                });
+                if (claimed.count === 0) {
+                    throw new ApiError("This coupon has reached its usage limit", 400);
+                }
+
+                await tx.couponRedemption.create({
+                    data: {
+                        couponId: coupon.id,
+                        userId,
+                        courseId,
+                        originalPrice: pricing.originalPrice,
+                        discountAmount: pricing.discountAmount,
+                        finalPrice: 0,
+                    },
+                });
+
+                return created;
+            });
+
+            return res.status(201).json({
+                success: true,
+                message: "Enrolled successfully",
+                data: { enrollmentId: enrollment.id, isFree: true },
+            });
+        }
+
+        const data = await PaymentController.createClientSecretKey(course, req.user, couponData);
 
         data.paymentKey =
             `https://accept.paymob.com/unifiedcheckout/?publicKey=${process.env.PAYMOB_PUBLIC_KEY}&clientSecret=` +
@@ -71,17 +114,12 @@ class EnrollmentController {
             slug: true,
             image: true,
             level: true,
-            price: true,
-            isFree: true,
-            hasDiscount: true,
-            discountPercent: true,
-            priceAfterDiscount: true,
             createdAt: true,
             sections: {
                 where: { isDeleted: false },
                 select: {
                     _count: {
-                        select: { lessons: { where: { isDeleted: false } } },
+                        select: { lessons: { where: { isDeleted: false, videoStatus: "READY" } } },
                     },
                 },
             },
@@ -172,6 +210,10 @@ class EnrollmentController {
                                         isPreview: true,
                                         videoStatus: true,
                                         attachments: true,
+                                        progress: {
+                                            where: { userId },
+                                            select: { isCompleted: true, completedAt: true },
+                                        },
                                     },
                                 },
                             },
@@ -188,6 +230,10 @@ class EnrollmentController {
                 lesson.attachments = lesson.attachments.map((key) => ({
                     name: key.split("/").pop(),
                 }));
+
+                lesson.isCompleted = lesson.progress[0]?.isCompleted ?? false;
+                lesson.completedAt = lesson.progress[0]?.completedAt ?? null;
+                delete lesson.progress;
             })
         );
 
