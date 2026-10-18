@@ -4,6 +4,7 @@ const asyncHandler = require('express-async-handler');
 const BunnyService = require("../services/bunny.service");
 const R2Service = require("../services/cloudflare.r2.service");
 const { ADMIN, SUPER_ADMIN } = require("../utils/constants");
+const { recalculateProgress } = require("../utils/lessonProgress");
 
 class LessonController {
 
@@ -275,6 +276,101 @@ class LessonController {
         res.status(200).json({
             success: true,
             data: { name: key.split("/").pop(), url },
+        });
+    });
+
+    // @desc   Mark a lesson as completed
+    // @route  POST /lessons/:lessonId/complete
+    // @access Private
+    completeLesson = asyncHandler(async (req, res, next) => {
+        const { lessonId } = req.params;
+        const userId = req.user.id;
+
+        const lesson = await prisma.lesson.findFirst({
+            where: { id: lessonId, isDeleted: false, section: { isDeleted: false } },
+            select: { id: true, section: { select: { courseId: true } } },
+        });
+        if (!lesson) {
+            return next(new ApiError("Lesson not found", 404));
+        }
+
+        const courseId = lesson.section.courseId;
+
+        const enrollment = await prisma.enrollment.findUnique({
+            where: { userId_courseId: { userId, courseId } },
+            select: { id: true },
+        });
+        if (!enrollment) {
+            return next(new ApiError("You are not enrolled in this course", 403));
+        }
+
+        const courseProgress = await prisma.$transaction(async (tx) => {
+            await tx.lessonProgress.upsert({
+                where: { userId_lessonId: { userId, lessonId } },
+                update: {},
+                create: {
+                    userId,
+                    lessonId,
+                    isCompleted: true,
+                    completedAt: new Date(),
+                },
+            });
+
+            return recalculateProgress(tx, userId, courseId);
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Lesson marked as completed",
+            data: {
+                lessonId,
+                isCompleted: true,
+                courseProgress: courseProgress.progress,
+                courseCompleted: courseProgress.completedAt !== null,
+            },
+        });
+    });
+
+    // @desc   Mark a lesson as not completed
+    // @route  POST /lessons/:lessonId/uncomplete
+    // @access Private
+    uncompleteLesson = asyncHandler(async (req, res, next) => {
+        const { lessonId } = req.params;
+        const userId = req.user.id;
+
+        const lesson = await prisma.lesson.findFirst({
+            where: { id: lessonId, isDeleted: false, section: { isDeleted: false } },
+            select: { section: { select: { courseId: true } } },
+        });
+        if (!lesson) {
+            return next(new ApiError("Lesson not found", 404));
+        }
+
+        const courseId = lesson.section.courseId;
+
+        const enrollment = await prisma.enrollment.findUnique({
+            where: { userId_courseId: { userId, courseId } },
+            select: { id: true },
+        });
+        if (!enrollment) {
+            return next(new ApiError("You are not enrolled in this course", 403));
+        }
+
+        const courseProgress = await prisma.$transaction(async (tx) => {
+            await tx.lessonProgress.deleteMany({ where: { userId, lessonId } });
+
+            return recalculateProgress(tx, userId, courseId);
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Lesson marked as not completed",
+            data: {
+                lessonId,
+                isCompleted: false,
+                courseProgress: courseProgress.progress,
+                courseCompleted: courseProgress.completedAt !== null,
+            },
         });
     });
 
