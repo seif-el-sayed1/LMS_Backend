@@ -68,17 +68,17 @@ enum CouponType {
 
 // Models
 model Admin {
-  id                     String    @id @default(uuid())
+  id                     String         @id @default(uuid())
   firstName              String
   lastName               String
-  email                  String    @unique
-  role                   Role      @default(ADMIN)
+  email                  String         @unique
+  role                   Role           @default(ADMIN)
   password               String
-  phone                  String?   @unique
-  isSuperAdmin           Boolean   @default(false)
-  isVerified             Boolean   @default(false)
-  isBlocked              Boolean   @default(false)
-  isDeleted              Boolean   @default(false)
+  phone                  String?        @unique
+  isSuperAdmin           Boolean        @default(false)
+  isVerified             Boolean        @default(false)
+  isBlocked              Boolean        @default(false)
+  isDeleted              Boolean        @default(false)
   passwordChangedAt      DateTime?
   passwordResetToken     String?
   passwordResetExpiresAt DateTime?
@@ -86,8 +86,9 @@ model Admin {
   verificationTokenExp   DateTime?
   token                  String?
   tokenExpDate           DateTime?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  notifications          Notification[]
 
   @@index([firstName, lastName])
 }
@@ -135,6 +136,7 @@ model User {
   enrollments               Enrollment[]
   payments                  Payment[]
   couponRedemptions         CouponRedemption[]
+  lessonProgresses          LessonProgress[]
 
   @@index(fullName)
 }
@@ -220,14 +222,19 @@ model Lesson {
 }
 
 model LessonProgress {
-  id          String    @id @default(uuid())
-  userId      String
-  lessonId    String
-  lesson      Lesson    @relation(fields: [lessonId], references: [id])
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  lessonId String
+  lesson   Lesson @relation(fields: [lessonId], references: [id])
+
   isCompleted Boolean   @default(false)
   completedAt DateTime?
 
   @@unique([userId, lessonId])
+  @@index([lessonId])
 }
 
 model Payment {
