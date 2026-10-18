@@ -2,7 +2,7 @@ const asyncHandler = require("express-async-handler");
 const prisma = require("../startup/db");
 const ApiError = require("../utils/ApiError");
 const ApiFeatures = require("../utils/ApiFeatures");
-const { generateCoupons } = require("../utils/generateCoupons");
+const { generateCoupons, evaluateCoupon } = require("../utils/coupons");
 
 class CouponController {
 
@@ -173,7 +173,30 @@ class CouponController {
         });
     });
 
-    
+
+    //@desc    Check if a coupon is valid
+    //@route   POST /coupons/check
+    //@access  Public
+    checkCoupon = asyncHandler(async (req, res, next) => {
+        const { code, courseId } = req.body;
+
+        const { coupon, pricing } = await evaluateCoupon({
+            code,
+            courseId,
+            userId: req.user.id,
+        });
+
+        res.status(200).json({
+            success: true,
+            data: {
+                code: coupon.code,
+                type: coupon.type,
+                ...pricing,
+                isFree: pricing.finalPrice === 0,
+            },
+        });
+    });
+
 }
 
 module.exports = new CouponController();
