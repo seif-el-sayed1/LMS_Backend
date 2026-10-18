@@ -137,6 +137,7 @@ model User {
   payments                  Payment[]
   couponRedemptions         CouponRedemption[]
   lessonProgresses          LessonProgress[]
+  notifications             Notification[]
 
   @@index(fullName)
 }
@@ -345,4 +346,24 @@ model CouponRedemption {
   @@index([couponId, userId])
   @@index([userId])
   @@index([courseId])
+}
+
+model Notification {
+  id           String    @id @default(uuid())
+  title        String
+  body         String?
+  case         String?
+  info         String?
+  isGlobal     Boolean   @default(false)
+  seen         Boolean   @default(false)
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  sendBy       Admin?    @relation(fields: [adminId], references: [id])
+  createdAt    DateTime  @default(now())
+  scheduleTime DateTime? @default(now())
+  adminId      String?
+  batchId      String?
+
+  @@index([batchId])
+  @@index([userId, seen])
 }
