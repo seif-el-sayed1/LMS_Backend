@@ -275,6 +275,69 @@ class CouponController {
             data: redemptions,
         });
     });
+
+    // @desc    Generate bulk coupons
+    // @route   POST /coupons/bulk
+    // @access  Private (ADMIN, SUPER_ADMIN)
+    generateBulkCoupons = asyncHandler(async (req, res, next) => {
+        const {
+            count, type, value, maxUses, perUserLimit,
+            startsAt, expiresAt, isActive, courseId,
+        } = req.body;
+
+        const course = await prisma.course.findFirst({
+            where: { id: courseId, isDeleted: false },
+            select: { id: true },
+        });
+        if (!course) {
+            return next(new ApiError("Course not found", 404));
+        }
+
+        const codes = new Set();
+        for (let round = 0; round < 5 && codes.size < count; round++) {
+            while (codes.size < count) {
+                codes.add(generateCoupons());
+            }
+
+            const taken = await prisma.coupon.findMany({
+                where: { code: { in: [...codes] } },
+                select: { code: true },
+            });
+            taken.forEach(({ code }) => codes.delete(code));
+        }
+
+        if (codes.size < count) {
+            return next(new ApiError("Could not generate enough unique codes, try again", 500));
+        }
+
+        const codesList = [...codes];
+
+        await prisma.coupon.createMany({
+            data: codesList.map((code) => ({
+                code,
+                type,
+                value: value ?? null,
+                maxUses: maxUses ?? (type === "FULL_ACCESS" ? 1 : null),
+                perUserLimit,
+                startsAt: startsAt ? new Date(startsAt) : null,
+                expiresAt: expiresAt ? new Date(expiresAt) : null,
+                isActive,
+                courseId,
+            })),
+        });
+
+        res.status(201).json({
+            success: true,
+            message: `${codesList.length} coupons generated successfully`,
+            data: {
+                count: codesList.length,
+                courseId,
+                type,
+                codes: codesList,
+            },
+        });
+    });
+
     
 }
 
