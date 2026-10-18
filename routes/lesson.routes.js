@@ -18,6 +18,17 @@ router.route("/:courseId/:lessonId/video")
         LessonController.getLessonVideo
     )
 
+router.route("/:lessonId/complete")
+    .post(
+        protect,
+        allowedTo(USER),
+        LessonController.completeLesson
+    ).delete(
+        protect,
+        allowedTo(USER),
+        LessonController.uncompleteLesson
+    )
+
 router.route("/:courseId/:lessonId/attachment/:index")
     .get(
         optionalAuth,
