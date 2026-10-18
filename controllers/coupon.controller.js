@@ -197,6 +197,85 @@ class CouponController {
         });
     });
 
+    // @desc    Get coupon redemptions
+    // @route   GET  /coupons/:id/redemptions
+    // @access  Private (ADMIN, SUPER_ADMIN)
+    getCouponRedemptions = asyncHandler(async (req, res, next) => {
+        const couponId =  req.params.id;
+        const initialWhere = {};
+
+        if (couponId) {
+            const couponExists = await prisma.coupon.findUnique({
+                where: { id: couponId },
+                select: { id: true },
+            });
+            if (!couponExists) {
+                return next(new ApiError("Coupon not found", 404));
+            }
+            initialWhere.couponId = couponId;
+        }
+
+        const apiFeatures = new ApiFeatures(
+            prisma.couponRedemption,
+            req.query,
+            "CouponRedemption",
+            {
+                where: initialWhere,
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            fullName: true,
+                            phone: true,
+                            studentCode: true,
+                        },
+                    },
+                    coupon: {
+                        select: {
+                            id: true,
+                            code: true,
+                            type: true,
+                            value: true,
+                        },
+                    },
+                    course: {
+                        select: {
+                            id: true,
+                            title: true,
+                            slug: true,
+                            price: true,
+                        },
+                    },
+                    payment: {
+                        select: {
+                            id: true,
+                            orderCode: true,
+                        },
+                    },
+                },
+            }
+        )
+            .search()
+            .filter()
+            .sort()
+            .paginate();
+
+        if (couponId) {
+            apiFeatures.prismaArgs.where.couponId = couponId;
+        }
+
+        await apiFeatures.calculatePagination();
+        const redemptions = await apiFeatures.execute();
+
+        res.status(200).json({
+            success: true,
+            message: "Coupon redemptions fetched successfully",
+            pagination: apiFeatures.paginationResult,
+            results: redemptions.length,
+            data: redemptions,
+        });
+    });
+    
 }
 
 module.exports = new CouponController();
