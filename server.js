@@ -15,6 +15,7 @@ const PORT = args.port || process.env.PORT || 8000;
 require("./startup/app")(app);
 require("./startup/createSuperAdmin")();
 require("./startup/db")
+require("./startup/socket")(server, app);
 
 // Server
 server.listen(PORT, (_) => {
