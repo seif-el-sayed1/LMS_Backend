@@ -175,6 +175,20 @@ class PaymentClass {
       const result = await prisma.$transaction(async (tx) => {
         const payment = await tx.payment.findUnique({
           where: { orderCode },
+          include: {
+            course: {
+              select: {
+                id: true,
+                title: true,
+              },
+            },
+            user: {
+              select: {
+                id: true,
+                lang: true,
+              },
+            },
+          },
         });
 
         if (!payment) return { ignored: "PAYMENT_NOT_FOUND" };
@@ -233,6 +247,19 @@ class PaymentClass {
               },
             });
           }
+
+          const courseTitle = payment.course?.title || "";
+
+          await tx.notification.create({
+            data: {
+              userId: payment.userId,
+              title: "Payment Confirmed & Enrolled! 🎉",
+              body: `Your payment was confirmed and you are now enrolled in ${courseTitle}. Happy learning!`,
+              case: "PAYMENT_SUCCESS",
+              info: payment.courseId,
+              isGlobal: false,
+            },
+          });
         }
 
         return { ignored: null };
