@@ -66,6 +66,11 @@ enum CouponType {
   FIXED
 }
 
+enum SenderType {
+  USER
+  ADMIN
+}
+
 // Models
 model Admin {
   id                     String         @id @default(uuid())
@@ -89,6 +94,7 @@ model Admin {
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
   notifications          Notification[]
+  chats                  Chat[]
 
   @@index([firstName, lastName])
 }
@@ -138,6 +144,7 @@ model User {
   couponRedemptions         CouponRedemption[]
   lessonProgresses          LessonProgress[]
   notifications             Notification[]
+  chats                     Chat[]
 
   @@index(fullName)
 }
@@ -366,4 +373,36 @@ model Notification {
 
   @@index([batchId])
   @@index([userId, seen])
+}
+
+model Chat {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  adminId   String
+  admin     Admin    @relation(fields: [adminId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  messages  Message[]
+
+  @@unique([userId, adminId])
+  @@index([userId])
+  @@index([adminId])
+}
+
+model Message {
+  id          String     @id @default(uuid())
+  chatId      String
+  chat        Chat       @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  senderId    String
+  senderType  SenderType
+  content     String
+  type        String     @default("text")
+  isDelivered Boolean    @default(false)
+  isRead      Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([chatId])
+  @@index([senderId])
 }
