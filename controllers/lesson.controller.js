@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const prisma = require('../startup/db');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('express-async-handler');
@@ -18,7 +19,15 @@ class LessonController {
         if (!title) return next(new ApiError("Title is required", 400));
 
         const existingSection = await prisma.section.findFirst({
-            where: { id: sectionId, isDeleted: false }
+            where: { id: sectionId, isDeleted: false },
+            include: {
+                course: {
+                    select: {
+                        id: true,
+                        title: true,
+                    },
+                },
+            },
         });
 
         if (!existingSection) {
@@ -161,6 +170,24 @@ class LessonController {
                 console.error("Failed to fetch video metadata:", err.message);
             }
 
+            const lesson = await prisma.lesson.findFirst({
+                where: { bunnyVideoId: VideoGuid, isDeleted: false },
+                include: {
+                    section: {
+                        include: {
+                            course: {
+                                select: {
+                                    id: true,
+                                    title: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            const wasNotReady = lesson && lesson.videoStatus !== "READY";
+
             await prisma.lesson.updateMany({
                 where: { bunnyVideoId: VideoGuid },
                 data: {
@@ -168,6 +195,40 @@ class LessonController {
                     ...(duration ? { duration } : {})
                 }
             });
+
+            // Notify enrolled students only when video is actually READY
+            if (lesson && wasNotReady) {
+                const courseId = lesson.section?.courseId;
+                const courseTitle = lesson.section?.course?.title || "";
+
+                if (courseId) {
+                    const enrollments = await prisma.enrollment.findMany({
+                        where: { courseId },
+                        select: { userId: true },
+                    });
+
+                    if (enrollments.length > 0) {
+                        const batchId = crypto.randomUUID();
+                        const notificationData = enrollments.map((enrollment) => ({
+                            userId: enrollment.userId,
+                            batchId,
+                            title: `New lesson uploaded in ${courseTitle} 📚`,
+                            body: `A new lesson titled ${lesson.title} was uploaded to "${courseTitle}". Check it out now!`,
+                            case: "NEW_LESSON",
+                            info: courseId,
+                            isGlobal: false,
+                            seen: false,
+                        }));
+
+                        const CHUNK_SIZE = 1000;
+                        for (let i = 0; i < notificationData.length; i += CHUNK_SIZE) {
+                            await prisma.notification.createMany({
+                                data: notificationData.slice(i, i + CHUNK_SIZE),
+                            });
+                        }
+                    }
+                }
+            }
         } else if (Status === 5) {
             await prisma.lesson.updateMany({
                 where: { bunnyVideoId: VideoGuid },
