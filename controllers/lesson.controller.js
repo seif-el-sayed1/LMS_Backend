@@ -196,36 +196,46 @@ class LessonController {
                 }
             });
 
-            // Notify enrolled students only when video is actually READY
-            if (lesson && wasNotReady) {
-                const courseId = lesson.section?.courseId;
+            if (lesson?.section?.courseId) {
+                const courseId = lesson.section.courseId;
                 const courseTitle = lesson.section?.course?.title || "";
+                const enrollments = await prisma.enrollment.findMany({
+                    where: { courseId },
+                    select: { userId: true },
+                });
 
-                if (courseId) {
-                    const enrollments = await prisma.enrollment.findMany({
-                        where: { courseId },
-                        select: { userId: true },
-                    });
+                const PROGRESS_BATCH_SIZE = 50;
+                for (let i = 0; i < enrollments.length; i += PROGRESS_BATCH_SIZE) {
+                    await Promise.all(
+                        enrollments
+                            .slice(i, i + PROGRESS_BATCH_SIZE)
+                            .map(({ userId }) =>
+                                prisma.$transaction((tx) =>
+                                    recalculateProgress(tx, userId, courseId)
+                                )
+                            )
+                    );
+                }
 
-                    if (enrollments.length > 0) {
-                        const batchId = crypto.randomUUID();
-                        const notificationData = enrollments.map((enrollment) => ({
-                            userId: enrollment.userId,
-                            batchId,
-                            title: `New lesson uploaded in ${courseTitle} 📚`,
-                            body: `A new lesson titled ${lesson.title} was uploaded to "${courseTitle}". Check it out now!`,
-                            case: "NEW_LESSON",
-                            info: courseId,
-                            isGlobal: false,
-                            seen: false,
-                        }));
+                // Notify enrolled students only when the video first becomes READY.
+                if (wasNotReady && enrollments.length > 0) {
+                    const batchId = crypto.randomUUID();
+                    const notificationData = enrollments.map((enrollment) => ({
+                        userId: enrollment.userId,
+                        batchId,
+                        title: `New lesson uploaded in ${courseTitle} 📚`,
+                        body: `A new lesson titled ${lesson.title} was uploaded to "${courseTitle}". Check it out now!`,
+                        case: "NEW_LESSON",
+                        info: courseId,
+                        isGlobal: false,
+                        seen: false,
+                    }));
 
-                        const CHUNK_SIZE = 1000;
-                        for (let i = 0; i < notificationData.length; i += CHUNK_SIZE) {
-                            await prisma.notification.createMany({
-                                data: notificationData.slice(i, i + CHUNK_SIZE),
-                            });
-                        }
+                    const CHUNK_SIZE = 1000;
+                    for (let i = 0; i < notificationData.length; i += CHUNK_SIZE) {
+                        await prisma.notification.createMany({
+                            data: notificationData.slice(i, i + CHUNK_SIZE),
+                        });
                     }
                 }
             }
