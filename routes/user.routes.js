@@ -12,6 +12,14 @@ const UserValidator = require("../validators/user.validator");
 const router = express.Router();
 
 // User Routes
+
+router
+    .route("/")
+    .get(
+        protect,
+        allowedTo(SUPER_ADMIN, ADMIN),
+        UserController.getAllUsers
+    )
 router
     .route("/me")
     .get(
