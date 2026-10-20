@@ -1,6 +1,9 @@
 const crypto = require("crypto");
 const axios = require("axios");
 const prisma = require("../startup/db");
+const asyncHandler = require("express-async-handler");
+const ApiError = require("../utils/ApiError");
+const ApiFeatures = require("../utils/ApiFeatures");
 
 class PaymentClass {
   async createClientSecretKey(course, user, couponData = null) {
@@ -282,6 +285,156 @@ class PaymentClass {
       });
     }
   }
+
+  // @desc Get all payments
+  // @route GET /api/v1/payments
+  // @access Private
+  getAllPayments = asyncHandler(async (req, res) => {
+    const apiFeatures = new ApiFeatures(
+      prisma.payment,
+      req.query,
+      "Payment",
+      {
+        select: {
+          id: true,
+          courseId: true,
+          userId: true,
+          couponId: true,
+          orderCode: true,
+          amount: true,
+          billedAmount: true,
+          cardNum: true,
+          cardType: true,
+          currency: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          course: {
+            select: { id: true, title: true, slug: true },
+          },
+          user: {
+            select: { id: true, fullName: true, phone: true, studentCode: true },
+          },
+          coupon: {
+            select: { id: true, code: true },
+          },
+        },
+      }
+    )
+      .search()
+      .filter()
+      .sort()
+      .paginate();
+
+    await apiFeatures.calculatePagination();
+    const payments = await apiFeatures.execute();
+
+    res.status(200).json({
+      success: true,
+      message: "Payments fetched successfully",
+      pagination: apiFeatures.paginationResult,
+      results: payments.length,
+      data: payments,
+    });
+  });
+
+  // @desc    Get logged in user payments
+  // @route   GET /api/v1/payments/me
+  // @access  Private
+  getMyPayments = asyncHandler(async (req, res) => {
+    const apiFeatures = new ApiFeatures(
+      prisma.payment,
+      req.query,
+      "Payment",
+      {
+        where: { userId: req.user.id },
+        select: {
+          id: true,
+          courseId: true,
+          userId: true,
+          couponId: true,
+          orderCode: true,
+          amount: true,
+          billedAmount: true,
+          cardNum: true,
+          cardType: true,
+          currency: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          course: {
+            select: { id: true, title: true, slug: true },
+          },
+          coupon: {
+            select: { id: true, code: true },
+          },
+        },
+      }
+    )
+      .search()
+      .filter()
+      .sort()
+      .paginate();
+
+    apiFeatures.prismaArgs.where.userId = req.user.id;
+    await apiFeatures.calculatePagination();
+    const payments = await apiFeatures.execute();
+
+    res.status(200).json({
+      success: true,
+      message: "Payments fetched successfully",
+      pagination: apiFeatures.paginationResult,
+      results: payments.length,
+      data: payments,
+    });
+  });
+
+  // @desc    Get payment by id
+  // @route   GET /api/v1/payments/:id
+  // @access  Private
+  getPaymentById = asyncHandler(async (req, res, next) => {
+    const payment = await prisma.payment.findFirst({
+      where: {
+        id: req.params.id,
+        ...(req.role === "USER" ? { userId: req.user.id } : {}),
+      },
+      select: {
+        id: true,
+        courseId: true,
+        userId: true,
+        couponId: true,
+        orderCode: true,
+        amount: true,
+        billedAmount: true,
+        cardNum: true,
+        cardType: true,
+        currency: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        course: {
+          select: { id: true, title: true, slug: true },
+        },
+        user: {
+          select: { id: true, fullName: true, phone: true, studentCode: true },
+        },
+        coupon: {
+          select: { id: true, code: true },
+        },
+      },
+    });
+
+    if (!payment) {
+      return next(new ApiError("Payment not found", 404));
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Payment fetched successfully",
+      data: payment,
+    });
+  });
+
 }
 
 module.exports = new PaymentClass();
