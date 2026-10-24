@@ -67,6 +67,49 @@ const getAuthenticatedUser = async (token) => {
   }
 };
 
+module.exports = (server, app) => {
+  io = socketio(server, {
+    cors: { origin: "*", methods: ["GET", "POST"], credentials: true }
+  });
+  app.set("socketio", io);
+  app.set("onlineUsers", onlineUsers);
+
+  io.on("connection", async (socket) => {
+    try {
+      const token = socket.handshake.headers.authorization;
+      const { user: userData, error } = await getAuthenticatedUser(token);
+
+      if (error || !userData) {
+        socket.emit("error", error || "Authentication error");
+        socket.disconnect(true);
+        return;
+      }
+
+      socket.join(userData.id);
+      addOnlineUser(userData.id, socket.id);
+      emitOnlineUsers();
+
+      SocketController.messagesDeliveredOnConnect(io, socket, userData, chatRoomUsers);
+
+      socket.on("typing", (data) => SocketController.startTyping(socket, userData, data));
+      socket.on("stop-typing", (data) => SocketController.stopTyping(socket, userData, data));
+      socket.on("message-delivered", (data) => SocketController.messageDelivered(io, socket, userData, chatRoomUsers, data));
+      socket.on("join-chat", (data) => SocketController.joinChat(io, socket, userData, chatRoomUsers, data));
+      socket.on("leave-chat", (data) => SocketController.leaveChat(socket, userData, chatRoomUsers, data));
+      socket.on("new-message", (data) => SocketController.sendChatMessage(io, socket, userData, chatRoomUsers, data, onlineUsers));
+
+      socket.on("disconnect", () => {
+        removeOnlineUser(userData.id, socket.id);
+        SocketController.leaveAllChats(socket, userData, chatRoomUsers);
+        emitOnlineUsers();
+      });
+    } catch (error) {
+      socket.emit("error", { message: error.message });
+      socket.disconnect(true);
+    }
+  });
+};
+
 module.exports.chatRoomUsers = chatRoomUsers;
 module.exports.getIO = () => {
   if (!io) throw new Error("Socket.io not initialized!");
