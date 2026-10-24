@@ -125,6 +125,58 @@ class SocketController {
     }
   };
 
+  startTyping = async (socket, userData, { chatId }) => {
+    try {
+      if (!chatId) {
+        socket.emit("error", "Chat ID is required");
+        return;
+      }
+
+      const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+      if (!chat || (chat.userId !== userData.id && chat.adminId !== userData.id)) {
+        socket.emit("error", "Chat not found or unauthorized");
+        return;
+      }
+
+      const otherUserId = chat.userId === userData.id ? chat.adminId : chat.userId;
+      const displayName = userData.fullName || userData.firstName || "Admin";
+      socket.to(otherUserId).emit("typing", {
+        chatId,
+        userId: userData.id,
+        userName: displayName
+      });
+    } catch (error) {
+      console.error("Error in startTyping:", error);
+      socket.emit("error", "Failed to send typing indicator");
+    }
+  };
+
+  stopTyping = async (socket, userData, { chatId }) => {
+    try {
+      if (!chatId) {
+        socket.emit("error", "Chat ID is required");
+        return;
+      }
+
+      const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+      if (!chat || (chat.userId !== userData.id && chat.adminId !== userData.id)) {
+        socket.emit("error", "Chat not found or unauthorized");
+        return;
+      }
+
+      const otherUserId = chat.userId === userData.id ? chat.adminId : chat.userId;
+      const displayName = userData.fullName || userData.firstName || "Admin";
+      socket.to(otherUserId).emit("stop-typing", {
+        chatId,
+        userId: userData.id,
+        userName: displayName
+      });
+    } catch (error) {
+      console.error("Error in stopTyping:", error);
+      socket.emit("error", "Failed to send stop typing indicator");
+    }
+  };
+
 }
 
 module.exports = new SocketController();
