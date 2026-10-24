@@ -1,6 +1,11 @@
 const prisma = require("../startup/db");
 
 
+const addUserToChatRoom = (chatRoomUsers, chatId, userId, socketId) => {
+  if (!chatRoomUsers[chatId]) chatRoomUsers[chatId] = {};
+  if (!chatRoomUsers[chatId][userId]) chatRoomUsers[chatId][userId] = new Set();
+  chatRoomUsers[chatId][userId].add(socketId);
+};
 
 const isUserInChatRoom = (chatRoomUsers, chatId, userId) =>
   !!(chatRoomUsers[chatId]?.[userId] && chatRoomUsers[chatId][userId].size > 0);
@@ -80,6 +85,45 @@ class SocketController {
     }
   };
 
+  joinChat = async (io, socket, userData, chatRoomUsers, { chatId }) => {
+    try {
+      if (!chatId) {
+        socket.emit("error", "Chat ID is required");
+        return;
+      }
+
+      const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+      if (!chat || (chat.userId !== userData.id && chat.adminId !== userData.id)) {
+        socket.emit("error", "Chat not found or unauthorized");
+        return;
+      }
+
+      socket.join(chatId);
+      addUserToChatRoom(chatRoomUsers, chatId, userData.id, socket.id);
+
+      await prisma.message.updateMany({
+        where: {
+          chatId,
+          NOT: { senderId: userData.id }
+        },
+        data: {
+          isDelivered: true,
+          isRead: true
+        }
+      });
+
+      const otherUserId = chat.userId === userData.id ? chat.adminId : chat.userId;
+      if (otherUserId) {
+        io.to(otherUserId).emit("messages-seen", {
+          chatId,
+          seenTime: new Date()
+        });
+      }
+    } catch (error) {
+      console.error("Error in joinChat:", error);
+      socket.emit("error", "Failed to join chat");
+    }
+  };
 
 }
 
