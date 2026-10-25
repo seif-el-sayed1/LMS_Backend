@@ -354,6 +354,77 @@ class SocketController {
       socket.emit("error", { message: error.message });
     }
   };
+
+  messagesDeliveredOnConnect = async (io, socket, userData, chatRoomUsers) => {
+    try {
+      const whereClause = userData._senderType === "USER"
+        ? { userId: userData.id }
+        : { adminId: userData.id };
+
+      const chats = await prisma.chat.findMany({
+        where: whereClause,
+        select: { id: true, userId: true, adminId: true }
+      });
+      const chatIds = chats.map((chat) => chat.id);
+
+      if (chatIds.length === 0) return;
+
+      const undeliveredMessages = await prisma.message.findMany({
+        where: {
+          chatId: { in: chatIds },
+          NOT: { senderId: userData.id },
+          isDelivered: false
+        },
+        orderBy: { createdAt: "asc" }
+      });
+
+      if (undeliveredMessages.length === 0) return;
+
+      const messagesByChatId = {};
+      for (const msg of undeliveredMessages) {
+        if (!messagesByChatId[msg.chatId]) messagesByChatId[msg.chatId] = [];
+        messagesByChatId[msg.chatId].push(msg);
+      }
+
+      for (const [chatId, messages] of Object.entries(messagesByChatId)) {
+        const isInRoom = isUserInChatRoom(chatRoomUsers, chatId, userData.id);
+        const updateData = { isDelivered: true };
+        if (isInRoom) updateData.isRead = true;
+
+        await prisma.message.updateMany({
+          where: {
+            chatId,
+            NOT: { senderId: userData.id },
+            isDelivered: false
+          },
+          data: updateData
+        });
+
+        const chat = chats.find((c) => c.id === chatId);
+        const otherUserId = chat.userId === userData.id ? chat.adminId : chat.userId;
+
+        if (otherUserId) {
+          const lastMessage = messages[messages.length - 1];
+
+          io.to(otherUserId).emit("message-delivered", {
+            chatId,
+            messageId: lastMessage.id,
+            messageTime: lastMessage.createdAt
+          });
+
+          if (isInRoom) {
+            io.to(otherUserId).emit("messages-seen", {
+              chatId,
+              seenTime: new Date()
+            });
+          }
+        }
+      }
+    } catch (error) {
+      socket.emit("error", { message: error.message });
+    }
+  };
+
 }
 
 module.exports = new SocketController();
