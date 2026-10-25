@@ -1,6 +1,5 @@
 const prisma = require("../startup/db");
 
-
 const addUserToChatRoom = (chatRoomUsers, chatId, userId, socketId) => {
   if (!chatRoomUsers[chatId]) chatRoomUsers[chatId] = {};
   if (!chatRoomUsers[chatId][userId]) chatRoomUsers[chatId][userId] = new Set();
@@ -17,6 +16,27 @@ const isUserOnline = (onlineUsers, userId) => {
   return false;
 };
 
+const findOrCreateUserAdminChat = async ({ userId, adminId }) => {
+  const existing = await prisma.chat.findUnique({
+    where: { userId_adminId: { userId, adminId } }
+  });
+  if (existing) return { chat: existing, firstMsg: false };
+
+  try {
+    const chat = await prisma.chat.create({
+      data: { userId, adminId }
+    });
+    return { chat, firstMsg: true };
+  } catch (error) {
+    if (error.code === "P2002") {
+      const chat = await prisma.chat.findUnique({
+        where: { userId_adminId: { userId, adminId } }
+      });
+      if (chat) return { chat, firstMsg: false };
+    }
+    throw error;
+  }
+};
 
 class SocketController {
 
@@ -177,6 +197,163 @@ class SocketController {
     }
   };
 
+  sendChatMessage = async (io, socket, userData, chatRoomUsers, data = {}, onlineUsers) => {
+    try {
+      let { content, chatId, adminId, userId: targetUserId, type = "text" } = data;
+      let firstMsg = false;
+      const senderType = userData._senderType;
+
+      if (type !== "text") {
+        socket.emit("error", "Only text messages are allowed via socket");
+        return;
+      }
+
+      if (typeof content !== "string" || !content.trim()) {
+        socket.emit("error", "Message content is required");
+        return;
+      }
+
+      content = content.trim();
+      if (content.length > 5000) {
+        socket.emit("error", "Message is too long");
+        return;
+      }
+
+      const hasChatId = !!chatId;
+      const hasAdminId = !!adminId;
+      const hasTargetUserId = !!targetUserId;
+
+      if ([hasChatId, hasAdminId, hasTargetUserId].filter(Boolean).length !== 1) {
+        socket.emit("error", "Provide exactly one of chatId, adminId, or userId");
+        return;
+      }
+
+      if (hasAdminId && senderType !== "USER") {
+        socket.emit("error", "Only users can start a chat with adminId");
+        return;
+      }
+
+      if (hasTargetUserId && senderType !== "ADMIN") {
+        socket.emit("error", "Only admins can start a chat with userId");
+        return;
+      }
+
+      let chat;
+
+      if (hasAdminId) {
+        const admin = await prisma.admin.findFirst({
+          where: { id: adminId, isDeleted: false, isBlocked: false }
+        });
+        if (!admin) {
+          socket.emit("error", "Admin not found");
+          return;
+        }
+
+        const result = await findOrCreateUserAdminChat({
+          userId: userData.id,
+          adminId
+        });
+        chat = result.chat;
+        firstMsg = result.firstMsg;
+        chatId = chat.id;
+        socket.join(chatId);
+        addUserToChatRoom(chatRoomUsers, chatId, userData.id, socket.id);
+      } else if (hasTargetUserId) {
+        const user = await prisma.user.findFirst({
+          where: { id: targetUserId, isActive: true, isBlocked: false }
+        });
+        if (!user) {
+          socket.emit("error", "User not found");
+          return;
+        }
+
+        const result = await findOrCreateUserAdminChat({
+          userId: targetUserId,
+          adminId: userData.id
+        });
+        chat = result.chat;
+        firstMsg = result.firstMsg;
+        chatId = chat.id;
+        socket.join(chatId);
+        addUserToChatRoom(chatRoomUsers, chatId, userData.id, socket.id);
+      } else {
+        chat = await prisma.chat.findUnique({ where: { id: chatId } });
+        if (!chat || (chat.userId !== userData.id && chat.adminId !== userData.id)) {
+          socket.emit("error", "Chat not found or unauthorized");
+          return;
+        }
+      }
+
+      const receiverId = chat.userId === userData.id ? chat.adminId : chat.userId;
+      const receiverIsOnline = isUserOnline(onlineUsers, receiverId);
+      const receiverInRoom = isUserInChatRoom(chatRoomUsers, chat.id, receiverId);
+
+      const newMessage = await prisma.message.create({
+        data: {
+          chatId: chat.id,
+          senderId: userData.id,
+          senderType,
+          content,
+          type: "text",
+          isDelivered: receiverInRoom || receiverIsOnline,
+          isRead: receiverInRoom
+        }
+      });
+
+      const senderDisplayName = userData.fullName || `${userData.firstName} ${userData.lastName}`;
+
+      const [userParticipant, adminParticipant] = await Promise.all([
+        prisma.user.findUnique({
+          where: { id: chat.userId },
+          select: { id: true, fullName: true, isActive: true }
+        }),
+        prisma.admin.findUnique({
+          where: { id: chat.adminId },
+          select: { id: true, firstName: true, lastName: true }
+        })
+      ]);
+
+      if (!userParticipant || !adminParticipant) {
+        socket.emit("error", "Chat participant not found");
+        return;
+      }
+
+      this.emitMessageToParticipants(io, {
+        chat,
+        message: newMessage,
+        senderId: userData.id,
+        senderDisplayName,
+        userTo: {
+          _id: userParticipant.id,
+          fullName: userParticipant.fullName,
+          isActive: userParticipant.isActive
+        },
+        adminTo: {
+          _id: adminParticipant.id,
+          fullName: `${adminParticipant.firstName} ${adminParticipant.lastName}`
+        },
+        firstMsg,
+        receiverId,
+        receiverInRoom,
+        receiverIsOnline
+      });
+
+      if (senderType === "ADMIN" && !receiverInRoom) {
+        await prisma.notification.create({
+          data: {
+            title: "New message",
+            body: content.length > 100 ? content.substring(0, 100) + "..." : content,
+            case: "chat",
+            info: chat.id,
+            userId: chat.userId,
+            adminId: chat.adminId
+          }
+        });
+      }
+    } catch (error) {
+      socket.emit("error", { message: error.message });
+    }
+  };
 }
 
 module.exports = new SocketController();
