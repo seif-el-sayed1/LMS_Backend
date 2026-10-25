@@ -425,6 +425,52 @@ class SocketController {
     }
   };
 
+  messageDelivered = async (io, socket, userData, chatRoomUsers, { messageId }) => {
+    try {
+      const message = await prisma.message.findUnique({
+        where: { id: messageId },
+        include: { chat: true }
+      });
+      if (!message) return;
+
+      const { chat } = message;
+      if (chat.userId !== userData.id && chat.adminId !== userData.id) {
+        return socket.emit("error", "Chat not found or unauthorized");
+      }
+
+      const isInRoom = isUserInChatRoom(chatRoomUsers, chat.id, userData.id);
+      const updateData = { isDelivered: true };
+      if (isInRoom) updateData.isRead = true;
+
+      await prisma.message.updateMany({
+        where: {
+          chatId: chat.id,
+          NOT: { senderId: userData.id },
+          createdAt: { lte: message.createdAt }
+        },
+        data: updateData
+      });
+
+      const otherUserId = chat.userId === userData.id ? chat.adminId : chat.userId;
+      if (otherUserId) {
+        io.to(otherUserId).emit("message-delivered", {
+          chatId: chat.id,
+          messageId: message.id,
+          messageTime: message.createdAt
+        });
+
+        if (isInRoom) {
+          io.to(otherUserId).emit("messages-seen", {
+            chatId: chat.id,
+            seenTime: new Date()
+          });
+        }
+      }
+    } catch (error) {
+      socket.emit("error", { message: error.message });
+    }
+  };
+
 }
 
 module.exports = new SocketController();
