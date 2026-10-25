@@ -6,6 +6,16 @@ const addUserToChatRoom = (chatRoomUsers, chatId, userId, socketId) => {
   chatRoomUsers[chatId][userId].add(socketId);
 };
 
+const removeUserFromChatRoom = (chatRoomUsers, chatId, userId, socketId) => {
+  const sockets = chatRoomUsers[chatId]?.[userId];
+  if (!sockets) return;
+  sockets.delete(socketId);
+  if (sockets.size === 0) delete chatRoomUsers[chatId][userId];
+  if (chatRoomUsers[chatId] && Object.keys(chatRoomUsers[chatId]).length === 0) {
+    delete chatRoomUsers[chatId];
+  }
+};
+
 const isUserInChatRoom = (chatRoomUsers, chatId, userId) =>
   !!(chatRoomUsers[chatId]?.[userId] && chatRoomUsers[chatId][userId].size > 0);
 
@@ -464,6 +474,29 @@ class SocketController {
             chatId: chat.id,
             seenTime: new Date()
           });
+        }
+      }
+    } catch (error) {
+      socket.emit("error", { message: error.message });
+    }
+  };
+
+  leaveChat = async (socket, userData, chatRoomUsers, { chatId }) => {
+    try {
+      socket.leave(chatId);
+      removeUserFromChatRoom(chatRoomUsers, chatId, userData.id, socket.id);
+    } catch (error) {
+      socket.emit("error", { message: error.message });
+    }
+  };
+
+  leaveAllChats = (socket, userData, chatRoomUsers) => {
+    try {
+      const userId = userData.id;
+      for (const chatId of Object.keys(chatRoomUsers)) {
+        if (chatRoomUsers[chatId]?.[userId]?.has(socket.id)) {
+          socket.leave(chatId);
+          removeUserFromChatRoom(chatRoomUsers, chatId, userId, socket.id);
         }
       }
     } catch (error) {
