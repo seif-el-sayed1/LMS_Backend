@@ -245,6 +245,64 @@ class ChatController {
     res.status(200).json({ success: true, data });
   });
 
+  // @desc    Get chat messages (paginated)
+  // @route   GET /chats/:id/messages
+  // @access  Private (USER, ADMIN, SUPER_ADMIN)
+  getChatMessages = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const role = req.role;
+    const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
+
+    const chat = await prisma.chat.findUnique({ where: { id } });
+    if (!chat) throw new ApiError("Chat not found", 404);
+
+    // Authorization check
+    if (isAdmin && chat.adminId !== userId) throw new ApiError("Not authorized to access this chat", 403);
+    if (!isAdmin && chat.userId !== userId) throw new ApiError("Not authorized to access this chat", 403);
+
+    const apiFeatures = new ApiFeatures(prisma.message, req.query, "Message", { where: { chatId: id } })
+      .search()
+      .filter()
+      .sort()
+      .paginate();
+
+    await apiFeatures.calculatePagination();
+    const messages = await apiFeatures.execute({
+      select: {
+        id: true, senderId: true, content: true, type: true,
+        isDelivered: true, isRead: true, createdAt: true
+      }
+    });
+
+    // Transform messages
+    const data = messages.map((msg) => ({
+      _id: msg.id,
+      content: msg.content,
+      type: msg.type,
+      isDelivered: msg.senderId === userId ? msg.isDelivered : true,
+      isRead: msg.senderId === userId ? msg.isRead : true,
+      isMyMsg: msg.senderId === userId,
+      createdAt: msg.createdAt
+    }));
+
+    // Mark all messages from others as delivered & read
+    await prisma.message.updateMany({
+      where: {
+        chatId: id,
+        NOT: { senderId: userId }
+      },
+      data: { isDelivered: true, isRead: true }
+    });
+
+    res.status(200).json({
+      success: true,
+      totalResults: data.length,
+      pagination: apiFeatures.paginationResult,
+      data
+    });
+  });
+
 
 }
 
