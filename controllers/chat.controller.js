@@ -191,6 +191,60 @@ class ChatController {
     });
   });
 
+  // @desc    Get one chat with recent messages
+  // @route   GET /chats/:id
+  // @access  Private (USER, ADMIN, SUPER_ADMIN)
+  getOneChat = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const role = req.role;
+    const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
+    const noOfMessages = parseInt(req.query.noOfMessages) || 10;
+
+    const chat = await prisma.chat.findUnique({
+      where: { id: req.params.id },
+      include: {
+        user: { select: { id: true, fullName: true, isActive: true } },
+        admin: { select: { id: true, firstName: true, lastName: true } }
+      }
+    });
+
+    if (!chat) throw new ApiError("Chat not found", 404);
+
+    // Authorization check
+    if (isAdmin && chat.adminId !== userId) throw new ApiError("Not authorized to access this chat", 403);
+    if (!isAdmin && chat.userId !== userId) throw new ApiError("Not authorized to access this chat", 403);
+
+    const messages = await prisma.message.findMany({
+      where: { chatId: chat.id },
+      orderBy: { createdAt: "desc" },
+      take: noOfMessages,
+      select: {
+        id: true, content: true, type: true, senderId: true,
+        isDelivered: true, isRead: true, createdAt: true
+      }
+    });
+
+    const to = isAdmin
+      ? { _id: chat.user.id, fullName: chat.user.fullName, isActive: chat.user.isActive }
+      : { _id: chat.admin.id, fullName: `${chat.admin.firstName} ${chat.admin.lastName}` };
+
+    const data = {
+      _id: chat.id,
+      to,
+      messages: messages.map((msg) => ({
+        _id: msg.id,
+        content: msg.content,
+        type: msg.type,
+        isDelivered: msg.isDelivered,
+        isRead: msg.isRead,
+        isMyMsg: msg.senderId === userId,
+        createdAt: msg.createdAt
+      }))
+    };
+
+    res.status(200).json({ success: true, data });
+  });
+
 
 }
 
