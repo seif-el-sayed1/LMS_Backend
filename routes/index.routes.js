@@ -33,6 +33,7 @@ appRouter.use(`${BASE_URL}/payments`, paymentRoutes);
 appRouter.use(`${BASE_URL}/enrollments`, enrollmentRoutes);
 appRouter.use(`${BASE_URL}/coupons`, couponRoutes);
 appRouter.use(`${BASE_URL}/notifications`, notificationRoutes);
+appRouter.use(`${BASE_URL}/chats`, chatRoutes);
 
 appRouter.use(`${BASE_URL}/governments`, governmentRoutes);
 appRouter.use(`${BASE_URL}/groupes`, groupeRoutes);
