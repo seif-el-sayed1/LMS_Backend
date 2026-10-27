@@ -105,6 +105,93 @@ class ChatController {
     });
   });
 
+  // @desc    List chat contacts (users see all admins, admins see all users)
+  // @route   GET /chats/contacts
+  // @access  Private (USER, ADMIN, SUPER_ADMIN)
+  getChatContacts = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const isAdmin = req.role === "ADMIN" || req.role === "SUPER_ADMIN";
+    const onlineUsers = req.app.get("onlineUsers");
+    const isOnline = (id) => !!(onlineUsers && typeof onlineUsers.has === "function" && onlineUsers.has(id));
+
+    if (isAdmin) {
+      const apiFeatures = new ApiFeatures(prisma.user, req.query, "User", {
+        where: { isActive: true, isBlocked: false },
+        select: { id: true, fullName: true, isActive: true }
+      })
+        .search()
+        .filter()
+        .sort()
+        .paginate();
+
+      apiFeatures.prismaArgs.where.isActive = true;
+      apiFeatures.prismaArgs.where.isBlocked = false;
+
+      await apiFeatures.calculatePagination();
+      const users = await apiFeatures.execute();
+      const userIds = users.map((u) => u.id);
+
+      const chats = userIds.length
+        ? await prisma.chat.findMany({
+            where: { adminId: userId, userId: { in: userIds } },
+            select: { id: true, userId: true }
+          })
+        : [];
+
+      const chatByUserId = {};
+      for (const chat of chats) chatByUserId[chat.userId] = chat.id;
+
+      return res.status(200).json({
+        success: true,
+        pagination: apiFeatures.paginationResult,
+        data: users.map((user) => ({
+          _id: user.id,
+          fullName: user.fullName,
+          isOnline: isOnline(user.id),
+          chatId: chatByUserId[user.id] || null
+        }))
+      });
+    }
+
+    const apiFeatures = new ApiFeatures(prisma.admin, req.query, "Admin", {
+      where: { isDeleted: false, isBlocked: false },
+      select: { id: true, firstName: true, lastName: true }
+    })
+      .search()
+      .filter()
+      .sort()
+      .paginate();
+
+    apiFeatures.prismaArgs.where.isDeleted = false;
+    apiFeatures.prismaArgs.where.isBlocked = false;
+
+    await apiFeatures.calculatePagination();
+    const admins = await apiFeatures.execute();
+    const adminIds = admins.map((a) => a.id);
+
+    const chats = adminIds.length
+      ? await prisma.chat.findMany({
+          where: { userId, adminId: { in: adminIds } },
+          select: { id: true, adminId: true }
+        })
+      : [];
+
+    const chatByAdminId = {};
+    for (const chat of chats) chatByAdminId[chat.adminId] = chat.id;
+
+    res.status(200).json({
+      success: true,
+      pagination: apiFeatures.paginationResult,
+      data: admins.map((admin) => ({
+        _id: admin.id,
+        fullName: `${admin.firstName} ${admin.lastName}`,
+        isOnline: isOnline(admin.id),
+        chatId: chatByAdminId[admin.id] || null
+      }))
+    });
+  });
+
+
 }
 
 module.exports = new ChatController();
