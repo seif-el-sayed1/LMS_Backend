@@ -20,10 +20,14 @@ class ApiFeatures {
       if (!keyword) return this;
 
       const searchFields = {
-          User: ["fullName", "email", "phone"],
+          User: ["fullName", "phone", "studentCode"],
           Admin: ["firstName", "lastName", "email"],
           Course: ["title", "description", "slug"],
           Coupon: ["code"],
+          Payment: ["orderCode"],
+          Notification: ["title", "body"],
+          Message: ["content"],
+          Chat: [],
       };
 
       const relationSearch = {
@@ -39,24 +43,45 @@ class ApiFeatures {
               { coupon: { code: { contains: keyword, mode: "insensitive" } } },
               { course: { title: { contains: keyword, mode: "insensitive" } } },
           ],
+          Payment: [
+              { user: { fullName: { contains: keyword, mode: "insensitive" } } },
+              { user: { phone: { contains: keyword, mode: "insensitive" } } },
+              { user: { studentCode: { contains: keyword, mode: "insensitive" } } },
+              { coupon: { code: { contains: keyword, mode: "insensitive" } } },
+              { course: { title: { contains: keyword, mode: "insensitive" } } },
+          ],
       };
 
       const fields = searchFields[this.modelName] || [];
       const relations = relationSearch[this.modelName] || [];
 
-      this.prismaArgs.where.OR = [
+      const searchConditions = [
           ...fields.map((field) => ({
               [field]: { contains: keyword, mode: "insensitive" }
           })),
           ...relations
       ];
 
+      if (searchConditions.length === 0) return this;
+
+      if (this.prismaArgs.where.OR || this.prismaArgs.where.AND) {
+          const existingWhere = { ...this.prismaArgs.where };
+          this.prismaArgs.where = {
+              AND: [
+                  existingWhere,
+                  { OR: searchConditions }
+              ]
+          };
+      } else {
+          this.prismaArgs.where.OR = searchConditions;
+      }
+
       return this;
   }
 
   filter() {
     const queryObj = { ...this.queryString };
-    const removeFields = ["search", "page", "limit", "sort", "select"];
+    const removeFields = ["search", "page", "limit", "sort", "order", "select"];
     removeFields.forEach((key) => delete queryObj[key]);
 
     const where = { ...this.prismaArgs.where };
@@ -75,10 +100,9 @@ class ApiFeatures {
             user: {
                 OR: [
                     {id: { contains: value, mode: "insensitive" } },
-                    {email: { contains: value, mode: "insensitive" } },
+                    {fullName: { contains: value, mode: "insensitive" } },
                     {phone: { contains: value, mode: "insensitive" } },
-                    { firstName: { contains: value, mode: "insensitive" } },
-                    { lastName: { contains: value, mode: "insensitive" } }
+                    {studentCode: { contains: value, mode: "insensitive" } },
                 ]
             }
         })
@@ -136,6 +160,11 @@ class ApiFeatures {
 
     if (sortType === "oldest") {
       this.prismaArgs.orderBy = { createdAt: "asc" };
+    } else if (sortType === "latest") {
+      this.prismaArgs.orderBy = { createdAt: "desc" };
+    } else if (sortType) {
+      const order = this.queryString.order === "asc" ? "asc" : "desc";
+      this.prismaArgs.orderBy = { [sortType]: order };
     } else {
       // default: latest first
       this.prismaArgs.orderBy = { createdAt: "desc" };
