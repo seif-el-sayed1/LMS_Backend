@@ -19,6 +19,9 @@ router.route("/")
 router.route("/contacts")
   .get(protect, allowedTo(USER, ADMIN, SUPER_ADMIN), ChatController.getChatContacts);
 
+router.route("/media")
+  .post(protect, allowedTo(USER, ADMIN, SUPER_ADMIN), ChatController.sendMediaMessage);
+
 router.route("/:id")
   .get(protect, allowedTo(USER, ADMIN, SUPER_ADMIN), ChatController.getOneChat);
 
