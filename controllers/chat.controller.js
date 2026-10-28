@@ -303,6 +303,194 @@ class ChatController {
     });
   });
 
+  // @desc    Send media message (images via R2)
+  // @route   POST /chats/media
+  // @access  Private (USER, ADMIN, SUPER_ADMIN)
+  sendMediaMessage = asyncHandler(async (req, res, next) => {
+    try {
+      const userId = req.user.id;
+      const role = req.role;
+      const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
+      const senderType = isAdmin ? "ADMIN" : "USER";
+      const { chatId, adminId: targetAdminId } = req.body;
+      const files = req.files?.chatImages || [];
+
+      if (files.length === 0) throw new ApiError("No images provided", 400);
+
+      let chat;
+      let firstMsg = false;
+
+      if (chatId && !targetAdminId) {
+        // Send to existing chat
+        chat = await prisma.chat.findUnique({ where: { id: chatId } });
+        if (!chat) throw new ApiError("Chat not found", 404);
+        if (isAdmin && chat.adminId !== userId) throw new ApiError("Not authorized", 403);
+        if (!isAdmin && chat.userId !== userId) throw new ApiError("Not authorized", 403);
+
+      } else if (targetAdminId && !chatId && !isAdmin) {
+        const admin = await prisma.admin.findFirst({
+          where: { id: targetAdminId, isDeleted: false, isBlocked: false }
+        });
+        if (!admin) throw new ApiError("Admin not found", 404);
+
+        chat = await prisma.chat.findUnique({
+          where: { userId_adminId: { userId, adminId: targetAdminId } }
+        });
+        if (!chat) {
+          chat = await prisma.chat.create({
+            data: { userId, adminId: targetAdminId }
+          });
+          firstMsg = true;
+        }
+
+      } else if (!chatId && isAdmin) {
+        const { userId: targetUserId } = req.body;
+        if (!targetUserId) throw new ApiError("Please provide chatId or userId", 400);
+
+        const user = await prisma.user.findFirst({
+          where: { id: targetUserId, isActive: true, isBlocked: false }
+        });
+        if (!user) throw new ApiError("User not found", 404);
+
+        chat = await prisma.chat.findUnique({
+          where: { userId_adminId: { userId: targetUserId, adminId: userId } }
+        });
+        if (!chat) {
+          chat = await prisma.chat.create({
+            data: { userId: targetUserId, adminId: userId }
+          });
+          firstMsg = true;
+        }
+
+      } else {
+        throw new ApiError("Please provide either chatId or target user/admin id", 400);
+      }
+
+      // Upload images to R2
+      const uploadedUrls = await Promise.all(
+        files.map((file) => R2Service.uploadChatImage(file))
+      );
+
+      // Get receiver info for socket events
+      const receiverId = isAdmin ? chat.userId : chat.adminId;
+      const io = req.app.get("socketio");
+      const onlineUsers = req.app.get("onlineUsers");
+      const { chatRoomUsers } = require("../startup/socket");
+
+      const receiverIsOnline = !!(onlineUsers && receiverId && (
+        typeof onlineUsers.has === "function"
+          ? onlineUsers.has(receiverId)
+          : Array.isArray(onlineUsers)
+            ? onlineUsers.includes(receiverId)
+            : false
+      ));
+      const receiverInRoom = SocketController.isUserInChatRoom(chatRoomUsers, chat.id, receiverId);
+
+      // Create messages in DB
+      const messages = [];
+      for (const url of uploadedUrls) {
+        const msg = await prisma.message.create({
+          data: {
+            chatId: chat.id,
+            senderId: userId,
+            senderType,
+            content: url,
+            type: "image",
+            isDelivered: receiverInRoom || receiverIsOnline,
+            isRead: receiverInRoom
+          }
+        });
+        messages.push(msg);
+      }
+
+      const [userParticipant, adminParticipant] = await Promise.all([
+        prisma.user.findUnique({
+          where: { id: chat.userId },
+          select: { id: true, fullName: true, isActive: true }
+        }),
+        prisma.admin.findUnique({
+          where: { id: chat.adminId },
+          select: { id: true, firstName: true, lastName: true }
+        })
+      ]);
+
+      if (!userParticipant || !adminParticipant) {
+        throw new ApiError("Chat participant not found", 404);
+      }
+
+      const senderDisplayName = req.user.fullName || `${req.user.firstName} ${req.user.lastName}`;
+      const userTo = {
+        _id: userParticipant.id,
+        fullName: userParticipant.fullName,
+        isActive: userParticipant.isActive
+      };
+      const adminTo = {
+        _id: adminParticipant.id,
+        fullName: `${adminParticipant.firstName} ${adminParticipant.lastName}`
+      };
+
+      messages.forEach((newMessage, index) => {
+        SocketController.emitMessageToParticipants(io, {
+          chat,
+          message: newMessage,
+          senderId: userId,
+          senderDisplayName,
+          userTo,
+          adminTo,
+          firstMsg: firstMsg && index === 0,
+          receiverId,
+          receiverInRoom,
+          receiverIsOnline
+        });
+      });
+
+      // Create DB notification if admin sends to user
+      if (senderType === "ADMIN" && !receiverInRoom) {
+        await prisma.notification.create({
+          data: {
+            title: "New message",
+            body: "You received new image(s)",
+            case: "chat",
+            info: chat.id,
+            userId: chat.userId,
+            adminId: chat.adminId
+          }
+        });
+      }
+
+      // Format response
+      const formatMsg = (msg) => ({
+        _id: msg.id,
+        chatId: msg.chatId,
+        content: msg.content,
+        type: msg.type,
+        isMyMsg: true,
+        isDelivered: receiverInRoom || receiverIsOnline,
+        isRead: receiverInRoom,
+        createdAt: msg.createdAt
+      });
+
+      res.status(201).json({
+        success: true,
+        chat: firstMsg ? {
+          _id: chat.id,
+          to: isAdmin ? userTo : adminTo,
+          messages: messages.map(formatMsg),
+          unreadMessagesCount: 0,
+        } : undefined,
+        messages: firstMsg ? undefined : messages.map(formatMsg),
+      });
+
+    } catch (error) {
+      // Rollback uploaded images on error
+      if (req._uploadedChatUrls && req._uploadedChatUrls.length > 0) {
+        await Promise.allSettled(
+          req._uploadedChatUrls.map((url) => R2Service.deleteChatImage(url))
+        );
+      }
+      next(error);
+    }
+  });
 
 }
 
