@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "esbuild server.js --bundle --platform=node --packages=external --outfile=dist/server.js"
   },
   "keywords": [],
   "author": "",
@@ -52,9 +53,12 @@
     "pg": "^8.23.0",
     "qrcode": "^1.5.4",
     "sharp": "^0.34.5",
+    "socket.io": "^4.8.4",
+    "twilio": "^6.2.0",
     "xss-clean": "^0.1.4"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "prisma": "^7.10.0"
   }
 }
