@@ -73,6 +73,25 @@ class R2Service {
                 url: await this.getAttachmentUrl(key)
             }))
         );
+
+    uploadChatImage = async (file) => {
+        const key = `chats/${crypto.randomUUID()}-${safeName(file.originalname)}`;
+
+        await s3.send(new PutObjectCommand({
+            Bucket: process.env.R2_PUBLIC_BUCKET,
+            Key: key,
+            Body: file.buffer,
+            ContentType: file.mimetype
+        }));
+
+        return `${process.env.R2_PUBLIC_URL}/${key}`;
+    };
+
+    deleteChatImage = (url) =>
+        s3.send(new DeleteObjectCommand({
+            Bucket: process.env.R2_PUBLIC_BUCKET,
+            Key: url.replace(`${process.env.R2_PUBLIC_URL}/`, "")
+        }));
 }
 
 module.exports = new R2Service();
