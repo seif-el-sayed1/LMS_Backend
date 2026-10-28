@@ -20,6 +20,7 @@ const filesConfiguration = multer({
 const uploadAnyFile = filesConfiguration.fields([
   { name: "image", maxCount: 1 },
   { name: "attachments", maxCount: 5 },
+  { name: "chatImages", maxCount: 5 },
 ]);
 
 module.exports = uploadAnyFile;
